@@ -1,0 +1,159 @@
+# Meta-Brain Configuration
+# Connectome-based metalearning for Drosophila CNS
+
+project:
+  name: "Meta-Brain"
+  description: "Metalearning on Drosophila male CNS connectome for Mario Bros"
+  version: "0.1.0"
+  author: "Matheus Soranço"
+  created: "2026-09-19"
+
+# Connectome data settings
+connectome:
+  dataset: "male-cns:v1.0"
+  neuprint_url: "https://neuprint.janelia.org"
+  # Token should be set via NEUPRINT_TOKEN environment variable
+  download_path: "data/connectome"
+  # Key neuron groups for sensorimotor loops
+  sensory_types:
+    - "OLSN"  # Optic lobe sensory neurons
+    - "ORN"   # Olfactory receptor neurons
+    - "AN"    # Auditory neurons (JO)
+    - "GRN"   # Gustatory receptor neurons
+    - "TN"    # Thermosensory/hygrosensory
+  motor_types:
+    - "MN"    # Motor neurons
+    - "DN"    # Descending neurons
+    - "vPN"   # Wing premotor
+    - "TN1A"  # Wing motor
+    - "vPR9"  # Wing motor
+    - "dPR157" # Wing motor
+  interneuron_types:
+    - "PN"    # Projection neurons
+    - "LHN"   # Lateral horn neurons
+    - "KEN"   # Kenyon cells (mushroom body)
+    - "MBON"  # Mushroom body output neurons
+    - "DAN"   # Dopaminergic neurons
+    - "FB"    # Fan-shaped body (central complex)
+    - "EB"    # Ellipsoid body
+    - "PB"    # Protocerebral bridge
+    - "pC1"   # Courtship/aggression command
+    - "AOTU"  # Anterior optic tubercle
+    - "vPN1"  # Auditory projection
+    - "aPN1"  # Auditory projection
+  dimorphic_hotspot_types:
+    - "LoVP92"
+    - "AOTU008"
+    - "DNp05"
+    - "VES202m"
+    - "VES200m"
+    - "DNg13"
+    - "pC1_6a"
+    - "mAL"
+
+# Spiking neural network simulation
+simulator:
+  backend: "brian2"  # or "nests", "norse", "snnx"
+  dt: 0.1  # ms
+  default_threshold: -50.0  # mV
+  default_reset: -65.0  # mV
+  default_refractory: 2.0  # ms
+  membrane_time_constant: 20.0  # ms
+  synaptic_time_constant: 5.0  # ms
+  # Connection parameters from connectome
+  synapse_weight_scale: 0.1  # nS per synapse
+  max_synapses_per_connection: 100
+  # Neurotransmitter effects (excitatory/inhibitory)
+  neurotransmitter_mapping:
+    "acetylcholine": 1.0   # excitatory
+    "GABA": -1.0           # inhibitory
+    "glutamate": -1.0      # inhibitory (in Drosophila)
+    "dopamine": 0.0        # modulatory
+    "octopamine": 0.0      # modulatory
+    "serotonin": 0.0       # modulatory
+
+# Mario Bros environment
+environment:
+  name: "SuperMarioBros-v0"
+  wrapper: "nes_py.wrappers:JoypadSpace"
+  actions:
+    - ["right"]
+    - ["right", "A"]
+    - ["right", "B"]
+    - ["right", "A", "B"]
+    - ["A"]
+    - ["left"]
+    - ["left", "A"]
+  frame_skip: 4
+  frame_stack: 4
+  resize: [84, 84]
+  grayscale: true
+  reward_scale: 0.01
+  max_episode_steps: 10000
+
+# Metalearning parameters
+metalearning:
+  algorithm: "MAML"  # MAML, Reptile, ANIL, Meta-SGD
+  meta_lr: 0.001
+  inner_lr: 0.01
+  inner_steps: 5
+  meta_batch_size: 4
+  num_tasks: 100
+  # For spiking networks
+  spike_coding: "rate"  # rate, temporal, latency, population
+  simulation_time: 100.0  # ms per decision
+  decision_interval: 50.0  # ms
+  # Plasticity rules
+  plasticity:
+    stdp_enabled: true
+    stdp_tau_plus: 20.0
+    stdp_tau_minus: 20.0
+    stdp_a_plus: 0.01
+    stdp_a_minus: 0.0105
+    homeostasis_enabled: true
+    target_rate: 10.0  # Hz
+
+# Training
+training:
+  seed: 42
+  device: "cuda"  # or "cpu"
+  num_workers: 4
+  checkpoint_interval: 1000
+  log_interval: 100
+  eval_interval: 5000
+  max_iterations: 100000
+  # Curriculum
+  curriculum:
+    enabled: true
+    stages:
+      - name: "random_exploration"
+        episodes: 1000
+        description: "Random actions to collect initial data"
+      - name: "simple_navigation"
+        episodes: 5000
+        description: "Move right, avoid obstacles"
+      - name: "enemy_avoidance"
+        episodes: 10000
+        description: "Jump over enemies"
+      - name: "level_completion"
+        episodes: 20000
+        description: "Complete levels"
+      - name: "speedrun"
+        episodes: 50000
+        description: "Optimize for speed"
+
+# Logging and monitoring
+logging:
+  level: "INFO"
+  tensorboard: true
+  wandb: false
+  wandb_project: "meta-brain"
+  save_dir: "logs"
+
+# Data paths
+paths:
+  data: "data"
+  checkpoints: "checkpoints"
+  logs: "logs"
+  results: "results"
+  cache: "cache"

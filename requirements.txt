@@ -1,0 +1,54 @@
+# Meta-Brain Requirements
+
+# Core scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+pyyaml>=6.0
+
+# Deep learning
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Spiking neural networks
+brian2>=2.5.4
+
+# Connectome data access
+neuprint-python>=0.6.3
+# Optional: for R-based access
+# r-maleCNS (via natverse)
+
+# Mario environment
+gymnasium>=0.29.0
+gym-super-mario-bros>=7.3.0
+nes-py>=8.2.1
+
+# Image processing
+opencv-python>=4.8.0
+scikit-image>=0.21.0
+Pillow>=10.0.0
+
+# Data formats
+pyarrow>=12.0.0
+h5py>=3.10.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tensorboard>=2.13.0
+
+# Progress tracking
+tqdm>=4.65.0
+
+# Jupyter for notebooks
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# Optional: Weights & Biases
+# wandb>=0.15.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.5.0

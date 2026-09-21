@@ -1,0 +1,69 @@
+# Meta-Brain .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.env
+.venv/
+.envrc
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Data files (large connectome data)
+data/connectome/*.feather
+data/connectome/*.parquet
+data/connectome/*.npz
+data/connectome/*_space_swc/
+data/connectome/obj/
+
+# Checkpoints and models
+checkpoints/
+*.pt
+*.pth
+*.weights.npz
+
+# Logs and results
+logs/
+results/
+*.log
+tensorboard/
+wandb/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Environment
+.env
+.env.local
