@@ -212,29 +212,33 @@ class DrosophilaSNN:
         self.synapses = b2.Synapses(self.neuron_group, self.neuron_group,
                                     model='''w : siemens
                                              tau_syn : second
-                                             is_excitatory : boolean''',
+                                             is_excitatory : boolean
+                                             Ee : volt
+                                             Ei : volt''',
                                     on_pre='''
                                     I_syn_e_post += w * is_excitatory * (Ee - v_post)
                                     I_syn_i_post += w * (1 - is_excitatory) * (Ei - v_post)
                                     ''',
                                     delay=1.0 * b2.ms)
-        
+
         # Synapse parameters
         Ee = 0 * b2.mV    # Excitatory reversal (ACh)
         Ei = -70 * b2.mV  # Inhibitory reversal (GABA/Glu)
         weight_scale = self.sim_config['synapse_weight_scale'] * b2.nS
-        
+
         # Connect synapses
         pre_indices = [self.id_to_index[s.pre] for s in self.synapse_params]
         post_indices = [self.id_to_index[s.post] for s in self.synapse_params]
         weights = [s.weight * weight_scale for s in self.synapse_params]
         is_exc = [s.neurotransmitter in [Neurotransmitter.ACETYLCHOLINE] for s in self.synapse_params]
-        
+
         self.synapses.connect(i=pre_indices, j=post_indices)
         self.synapses.w = weights
         self.synapses.is_excitatory = is_exc
+        self.synapses.Ee = Ee
+        self.synapses.Ei = Ei
         self.synapses.tau_syn = self.sim_config['synaptic_time_constant'] * b2.ms
-        
+
         print(f"Created {len(self.synapses)} synaptic connections")
         
         # Add STDP if enabled
@@ -253,38 +257,70 @@ class DrosophilaSNN:
         print("Brian2 network built successfully")
     
     def _add_stdp(self):
-        """Add STDP plasticity to synapses."""
-        import brian2 as b2
-        
-        stdp_config = self.sim_config['plasticity']
-        
-        stdp_eqs = '''
-        dApre/dt = -Apre / tau_plus : 1 (event-driven)
-        dApost/dt = -Apost / tau_minus : 1 (event-driven)
-        '''
-        
-        stdp_on_pre = '''
-        Apre += a_plus
-        w = clip(w + Apost, 0, wmax)
-        '''
-        
-        stdp_on_post = '''
-        Apost += a_minus
-        w = clip(w + Apre, 0, wmax)
-        '''
-        
-        self.synapses.model += stdp_eqs
-        self.synapses.on_pre += stdp_on_pre
-        self.synapses.on_post += stdp_on_post
-        
-        # Initialize STDP variables
-        self.synapses.Apre = 0
-        self.synapses.Apost = 0
-        self.synapses.tau_plus = stdp_config['stdp_tau_plus'] * b2.ms
-        self.synapses.tau_minus = stdp_config['stdp_tau_minus'] * b2.ms
-        self.synapses.a_plus = stdp_config['stdp_a_plus']
-        self.synapses.a_minus = -stdp_config['stdp_a_minus']
-        self.synapses.wmax = 10 * b2.nS
+            """Add STDP plasticity to synapses."""
+            import brian2 as b2
+
+            stdp_config = self.sim_config['plasticity']
+
+            # Rewrite the synapse model with STDP included
+            # We need to recreate the synapses with the extended model
+            stdp_eqs = '''
+            dApre/dt = -Apre / tau_plus : 1 (event-driven)
+            dApost/dt = -Apost / tau_minus : 1 (event-driven)
+            '''
+
+            stdp_on_pre = '''
+            Apre += a_plus
+            w = clip(w + Apost, 0*siemens, wmax)
+            '''
+
+            stdp_on_post = '''
+            Apost += a_minus
+            w = clip(w + Apre, 0*siemens, wmax)
+            '''
+
+            # Create new synapses with STDP
+            self.synapses = b2.Synapses(self.neuron_group, self.neuron_group,
+                                        model='''w : siemens
+                                                 tau_syn : second
+                                                 is_excitatory : boolean
+                                                 Ee : volt
+                                                 Ei : volt
+                                                 Apre : 1
+                                                 Apost : 1
+                                                 tau_plus : second
+                                                 tau_minus : second
+                                                 a_plus : 1
+                                                 a_minus : 1
+                                                 wmax : siemens''' + stdp_eqs,
+                                        on_pre='''
+                                        I_syn_e_post += w * is_excitatory * (Ee - v_post)
+                                        I_syn_i_post += w * (1 - is_excitatory) * (Ei - v_post)
+                                        ''' + stdp_on_pre,
+                                        on_post=stdp_on_post,
+                                        delay=1.0 * b2.ms)
+
+            # Reconnect
+            pre_indices = [self.id_to_index[s.pre] for s in self.synapse_params]
+            post_indices = [self.id_to_index[s.post] for s in self.synapse_params]
+            weights = [s.weight * weight_scale for s in self.synapse_params]
+            is_exc = [s.neurotransmitter in [Neurotransmitter.ACETYLCHOLINE] for s in self.synapse_params]
+
+            self.synapses.connect(i=pre_indices, j=post_indices)
+            self.synapses.w = weights
+            self.synapses.is_excitatory = is_exc
+            self.synapses.Ee = Ee
+            self.synapses.Ei = Ei
+            self.synapses.tau_syn = self.sim_config['synaptic_time_constant'] * b2.ms
+
+            # Initialize STDP variables
+            self.synapses.Apre = 0
+            self.synapses.Apost = 0
+            self.synapses.tau_plus = stdp_config['stdp_tau_plus'] * b2.ms
+            self.synapses.tau_minus = stdp_config['stdp_tau_minus'] * b2.ms
+            self.synapses.a_plus = stdp_config['stdp_a_plus']
+            self.synapses.a_minus = -stdp_config['stdp_a_minus']
+            self.synapses.wmax = 10 * b2.nS
     
     def inject_sensory_input(self, sensory_rates: Dict[int, float], duration: float):
         """

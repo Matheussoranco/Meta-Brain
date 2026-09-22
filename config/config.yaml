@@ -14,20 +14,29 @@ connectome:
   neuprint_url: "https://neuprint.janelia.org"
   # Token should be set via NEUPRINT_TOKEN environment variable
   download_path: "data/connectome"
-  # Key neuron groups for sensorimotor loops
+  # Key neuron groups for sensorimotor loops - MaleCNS v1.0 superclasses
   sensory_types:
-    - "OLSN"  # Optic lobe sensory neurons
-    - "ORN"   # Olfactory receptor neurons
-    - "AN"    # Auditory neurons (JO)
-    - "GRN"   # Gustatory receptor neurons
-    - "TN"    # Thermosensory/hygrosensory
+    - "ol_sensory"          # Optic lobe sensory
+    - "cb_sensory"          # Central brain sensory
+    - "vnc_sensory"         # VNC sensory
+    - "sensory_ascending"   # Ascending sensory
   motor_types:
-    - "MN"    # Motor neurons
-    - "DN"    # Descending neurons
-    - "vPN"   # Wing premotor
-    - "TN1A"  # Wing motor
-    - "vPR9"  # Wing motor
-    - "dPR157" # Wing motor
+    - "descending_neuron"   # Brain-to-VNC output (primary motor command)
+    - "vnc_motor"           # VNC motor neurons
+    - "cb_motor"            # Central brain motor
+  interneuron_types:
+    - "ol_intrinsic"        # Optic lobe intrinsic
+    - "cb_intrinsic"        # Central brain intrinsic
+    - "vnc_intrinsic"       # VNC intrinsic
+    - "visual_projection"   # Visual projection neurons
+    - "visual_centrifugal"  # Visual centrifugal neurons
+    - "ascending_neuron"    # Ascending interneurons
+    - "efferent_ascending"  # Efferent ascending
+    - "efferent_descending" # Efferent descending
+  modulatory_types:
+    - "dopamine"
+    - "octopamine"
+    - "serotonin"
   interneuron_types:
     - "PN"    # Projection neurons
     - "LHN"   # Lateral horn neurons
@@ -71,6 +80,15 @@ simulator:
     "dopamine": 0.0        # modulatory
     "octopamine": 0.0      # modulatory
     "serotonin": 0.0       # modulatory
+  # Plasticity rules
+  plasticity:
+    stdp_enabled: true
+    stdp_tau_plus: 20.0
+    stdp_tau_minus: 20.0
+    stdp_a_plus: 0.01
+    stdp_a_minus: 0.0105
+    homeostasis_enabled: true
+    target_rate: 10.0  # Hz
 
 # Mario Bros environment
 environment:
