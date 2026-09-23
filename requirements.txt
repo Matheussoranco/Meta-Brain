@@ -15,8 +15,10 @@ brian2>=2.5.4
 
 # Connectome data access
 neuprint-python>=0.6.3
-# Optional: for R-based access
-# r-maleCNS (via natverse)
+
+# GCS/Cloud storage (for MaleCNS data download)
+fsspec>=2023.0.0
+gcsfs>=2023.0.0
 
 # Mario environment
 gymnasium>=0.29.0

@@ -4,6 +4,7 @@ Orchestrates connectome loading, SNN simulation, environment, and metalearning.
 """
 
 import torch
+import torch.nn as nn
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from tqdm import tqdm
 from connectome.loader import ConnectomeLoader, create_default_loader
 from simulator.snn import create_snn, DrosophilaSNN, RateCodedSNN
 from environment.mario_env import create_mario_env, create_mario_vec_env, MarioEnv
-from metalearning.algorithms import (MetalearningConfig, MAML, Reptile, 
+from metalearning.algorithms import (MetalearningConfig, MAML, Reptile,
                                        SNNMetalearner, DifferentiableSNN,
                                        create_differentiable_snn_from_connectome,
                                        create_metalearner)
