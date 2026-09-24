@@ -1,255 +1,303 @@
-# Meta-Brain: Metalearning on Drosophila Connectome for Mario Bros
+# Meta-Brain
 
-> **I.S.A.A.C. Project** — Reducing the distance between intention and execution.
+## Full-connectome-inspired reinforcement learning with the *Drosophila melanogaster* connectome
 
-An experimental framework for metalearning on the *Drosophila melanogaster* male central nervous system connectome (MaleCNS v1.0), applying the fly's actual synaptic wiring to learn to play Super Mario Bros.
+Meta-Brain is an experimental framework for using the male *Drosophila melanogaster* central nervous system connectome as a sparse recurrent computational substrate for embodied learning.
 
-## Overview
+The project maps visual game observations into sensory neurons, propagates activity through a connectome-derived network, and decodes motor activity into discrete actions. The current demonstration uses Super Mario Bros. and reinforcement learning.
 
-This project implements a novel approach to biologically-inspired AI:
+This project does not claim to reproduce the human brain, consciousness, or general intelligence. It tests a narrower and measurable question:
 
-1. **Connectome as Architecture**: Uses the complete *Drosophila* male CNS connectome (166,700 neurons, ~6M synapses) as the structural scaffold for a spiking neural network
-2. **Metalearning for Adaptation**: Implements MAML, Reptile, and plasticity-based learning to rapidly adapt the fixed connectome structure to the Mario task
-3. **Sensorimotor Grounding**: Maps Mario's visual/game state to the fly's sensory neurons (optic lobe, olfactory, auditory, mechanosensory) and reads out from motor pathways (descending neurons, VNC motor circuits)
+> Can a digitally instantiated biological connectome support task-specific adaptive behavior?
 
-## Scientific Foundation
+## Current status
 
-Based on **Berg et al. (2026)** — *Sexual dimorphism in the complete Drosophila male central nervous system connectome* (Cell, 189, 5504–5526)
+The project has two experimental tracks:
 
-Key connectome features leveraged:
-- **Complete sensorimotor pathways**: From sensory neurons → interneurons → descending neurons → VNC motor neurons
-- **Dimorphic hotspots**: Circuits like LoVP92 → AOTU008 → DNg13 that integrate visual information for sex-specific behaviors
-- **Recurrent loops**: Auditory feedback circuits (song detection ↔ production) as models for sensorimotor integration
-- **Neuromodulatory systems**: Dopaminergic (reward), octopaminergic (arousal), serotonergic (behavioral state) for plasticity gating
+1. **Corridor control**
+   - Sensorimotor connectome subgraph.
+   - 40,000 neurons.
+   - 1,199,959 synaptic edges.
+   - Closed-loop reinforcement learning.
+   - Reward improved from `-2.08` before training to `7.13` after training.
+   - Post-training success rate: `25%`.
 
-## Architecture
+2. **Full-connectome Mario control**
+   - MaleCNS metadata loaded with `211,577` neurons.
+   - Full-scale sparse recurrent execution on CUDA.
+   - Visual input from game frames.
+   - Motor readout trained with policy-gradient reinforcement learning.
+   - Some training episodes reached approximately `x=1,800` in World 1-1.
+   - Final deterministic evaluation reached approximately `x=314` on average.
+   - Final evaluation did not yet reach the flag: `success_rate=0`, `flag_get=false`, and all five evaluation episodes ended in death.
 
+The Mario result should therefore be described as successful partial behavioral learning, not yet as robust level completion.
+
+## Demonstration artifacts
+
+The repository can include the following experiment artifacts:
+
+- [Pre-training Mario video](assets/full_brain_mario_v2_pre.mp4)
+- [Post-training Mario video](assets/full_brain_mario_v2_post.mp4)
+- [Training curves](assets/full_brain_mario_v2_curves.png)
+- [Training history](assets/full_brain_mario_v2_training.csv)
+- [Evaluation results](assets/full_brain_mario_v2_results.json)
+- [Motor readout checkpoint](assets/full_brain_mario_v2_readout.pt)
+- [Self-contained Colab notebook](notebooks/colab_full_brain_mario_v2.ipynb)
+
+The videos show the best recorded evaluation episode, selected by:
+
+1. successful completion without death;
+2. greatest horizontal progress;
+3. highest reward.
+
+## System architecture
+
+```text
++---------------------------+
+| Super Mario Bros.         |
+| RGB game frames           |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Visual encoding           |
+| 16x16 grayscale image    |
+| + frame difference        |
+| 512-dimensional code      |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Connectome input mapping  |
+| Fixed projection into     |
+| identified sensory cells |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Sparse recurrent brain    |
+| Connectome-derived graph  |
+| Leaky nonlinear dynamics  |
+| CUDA sparse propagation   |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Motor readout             |
+| Descending / motor cells  |
+| Trainable policy logits   |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| Discrete Mario actions    |
+| RIGHT_ONLY action space   |
++---------------------------+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      MARIO ENVIRONMENT                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │  Visual     │  │ Proprio-    │  │ Reward/     │             │
-│  │  (frame)    │  │ ception     │  │ Punishment  │             │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
-└─────────┼────────────────┼────────────────┼────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  SENSORY ENCODING                               │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
-│  │ OLSN         │ │ Mechanosen-  │ │ DAN/OAN      │            │
-│  │ (optic lobe) │ │ sory (GRN)   │ │ (reward)     │            │
-│  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘            │
-└─────────┼────────────────┼────────────────┼────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              DROSOPHILA CONNECTOME SNN                          │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Sensory → Interneurons (MB, CX, LH) → Descending → Motor │  │
-│  │  166K neurons, 6M synapses, STDP + neuromodulation       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   MOTOR DECODING                                │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
-│  │ DNg13        │ │ DNg31        │ │ Wing         │            │
-│  │ (turning)    │ │ (walking)    │ │ premotor     │            │
-│  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘            │
-└─────────┼────────────────┼────────────────┼────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    MARIO ACTIONS                                │
-│  [RIGHT, JUMP, RIGHT+JUMP, LEFT, ...]                          │
-└─────────────────────────────────────────────────────────────────┘
+
+## Connectome representation
+
+The MaleCNS data is represented as:
+
+- neuron metadata;
+- presynaptic neuron indices;
+- postsynaptic neuron indices;
+- weighted synaptic connections;
+- sensory neuron index set;
+- motor neuron index set.
+
+The model keeps the connectome sparse. It does not create a dense matrix with shape `N x N`.
+
+For each decision step:
+
+```text
+sensory drive -> sparse recurrent propagation -> motor activity -> action logits
 ```
+
+Synaptic weights are log-transformed and normalized by incoming connection energy to keep the full graph numerically stable.
+
+The connectome structure and sensory projection are frozen during the Mario experiment. The trainable component is the motor readout.
+
+## Learning procedure
+
+The Mario experiment uses episodic policy-gradient reinforcement learning.
+
+For each episode:
+
+1. Reset the game.
+2. Encode the current frame and frame difference.
+3. Propagate activity through the sparse connectome.
+4. Sample an action from the motor readout policy.
+5. Receive the game reward.
+6. Compute discounted returns.
+7. Update the motor readout using policy gradients.
+
+The current experiment is therefore best described as:
+
+> Frozen connectome reservoir + trainable motor readout + visual reinforcement learning.
+
+It is not yet a full MAML experiment. The repository contains MAML and related metalearning components, but the Mario result reported here is driven primarily by policy-gradient optimization of the readout.
+
+## Reproducing the self-contained Colab experiment
+
+Open:
+
+```text
+notebooks/colab_full_brain_mario_v2.ipynb
+```
+
+The notebook:
+
+1. Installs the required packages.
+2. Downloads the MaleCNS v1.0 files.
+3. Verifies the loaded graph scale.
+4. Loads the full sparse network.
+5. Creates the Gym-style Mario environment.
+6. Runs pre-training evaluation.
+7. Trains the motor readout with reinforcement learning.
+8. Runs post-training evaluation.
+9. Generates videos, plots, CSV metrics, JSON results and a checkpoint.
+
+The experiment requires:
+
+- CUDA-enabled GPU;
+- sufficient GPU memory;
+- MaleCNS v1.0 data;
+- `gym-super-mario-bros`;
+- the required game ROM/environment assets;
+- several gigabytes of storage for the connectome files.
 
 ## Installation
 
 ```bash
-# Clone and enter directory
-cd C:/Users/mathe/Documents/Code/Meta-Brain
+git clone https://github.com/Matheussoranco/Meta-Brain.git
+cd Meta-Brain
 
-# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+```
 
-# Install dependencies
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
 pip install -r requirements.txt
-
-# Install package in development mode
 pip install -e .
 ```
 
-### Connectome Data
+## Project structure
 
-Download the MaleCNS v1.0 data from Janelia:
-
-```bash
-# Option 1: Local files (recommended for large dataset)
-# Download from https://male-cns.janelia.org/download/
-# Place in data/connectome/
-
-# Option 2: Programmatic access via neuPrint (requires token)
-# Get token from https://neuprint.janelia.org (Account → Token)
-export NEUPRINT_TOKEN="your_token_here"
-```
-
-See `data/connectome/README.md` for detailed download instructions.
-
-## Usage
-
-### Quick Start: Random Baseline
-```bash
-meta-brain --mode baseline
-```
-
-### Training with STDP Plasticity (Recommended)
-```bash
-meta-brain --mode plasticity
-```
-
-### Training with MAML (Gradient-based Metalearning)
-```bash
-meta-brain --mode maml
-```
-
-### Resume from Checkpoint
-```bash
-meta-brain --mode plasticity --checkpoint checkpoint_latest.pt
-```
-
-## Configuration
-
-All parameters in `config/config.yaml`:
-
-- **Connectome**: Dataset version, neuPrint settings, neuron type selections
-- **Simulator**: Brian2 (spiking) or rate-coded, timestep, neuron/synapse parameters
-- **Environment**: Mario action space, frame preprocessing, reward shaping
-- **Metalearning**: Algorithm (MAML/Reptile), learning rates, inner steps, meta-batch size
-- **Training**: Curriculum stages, logging, checkpointing, device selection
-
-## Project Structure
-
-```
+```text
 Meta-Brain/
 ├── config/
-│   └── config.yaml              # All hyperparameters
+│   └── config.yaml
 ├── connectome/
-│   └── loader.py                # Connectome loading & graph construction
+│   └── loader.py
 ├── simulator/
-│   └── snn.py                   # Brian2 SNN & rate-coded SNN
+│   └── snn.py
 ├── environment/
-│   └── mario_env.py             # Mario Bros wrapper & encoding
+│   └── mario_env.py
 ├── metalearning/
-│   └── algorithms.py            # MAML, Reptile, ANIL, differentiable SNN
+│   └── algorithms.py
 ├── training/
-│   └── train.py                 # Main training pipeline
+│   └── train.py
+├── notebooks/
+│   ├── colab_sizable_brain_test.ipynb
+│   └── colab_full_brain_mario_v2.ipynb
+├── scripts/
+│   ├── download_data.py
+│   └── full_brain_mario_v2.py
 ├── data/
-│   └── connectome/              # Connectome data files (gitignored)
-├── checkpoints/                 # Model checkpoints (gitignored)
-├── logs/                        # Training logs (gitignored)
-├── results/                     # Evaluation results (gitignored)
-├── notebooks/                   # Jupyter notebooks for analysis
-├── scripts/                     # Utility scripts
-├── tests/                       # Unit tests
+│   └── connectome/
+├── tests/
 ├── requirements.txt
 ├── setup.py
 └── README.md
 ```
 
-## Key Concepts
+## Research questions
 
-### Connectome-to-SNN Mapping
+Meta-Brain is intended as an experimental platform for studying:
 
-| Connectome Element | SNN Implementation |
-|---|---|
-| Neuron | AdEx/Izhikevich model (Brian2) or rate unit |
-| Synapse | Conductance-based, Dale's law enforced |
-| Neurotransmitter | ACh=exc, GABA/Glu=inh, DA/OA/5HT=modulatory |
-| STDP | Pair-based, neuromodulator-gated |
-| Sensory neurons | Poisson input encoding game state |
-| Motor neurons | Rate readout → discrete action mapping |
+- whether connectome topology constrains learnable behavior;
+- how biological graph structure compares with shuffled or artificial graphs;
+- whether sensorimotor pathways support visual control;
+- how neuromodulatory plasticity can be incorporated into connectome-based models;
+- whether full-connectome execution provides measurable benefits over sensorimotor subgraphs;
+- how biologically inspired architectures compare with conventional neural networks.
 
-### Metalearning Tasks
+## Required next experiments
 
-1. **Basic Movement**: Move right, survive
-2. **Enemy Avoidance**: Jump over Goombas, avoid pits
-3. **Jumping**: Platform navigation
-4. **Level Completion**: Reach flag pole
+The current Mario result is promising but not conclusive. The next validation steps are:
 
-Each task has a custom reward function. Metalearning optimizes *initial synaptic weights* for fast within-episode adaptation via STDP.
+- fix and verify the reported retained edge count;
+- run multiple random seeds;
+- compare against a random-readout baseline;
+- compare against a shuffled-connectome control;
+- compare full-connectome and sensorimotor-subgraph variants;
+- evaluate on held-out levels;
+- report confidence intervals over episode success;
+- train until stable flag completion;
+- publish all configuration files and checkpoints.
 
-### Curriculum Learning
+## Scientific limitations
 
-Progressive task difficulty:
-```
-Stage 1 (1K ep): Random exploration → collect initial data
-Stage 2 (5K ep): Simple navigation → move right
-Stage 3 (10K ep): Enemy avoidance → jump timing
-Stage 4 (20K ep): Level completion → flag pole
-Stage 5 (50K ep): Speedrun → optimize time
-```
+This project should not be interpreted as:
 
-## Research Directions
+- a simulation of the human brain;
+- a complete biological simulation of every neuron and synapse;
+- evidence of consciousness;
+- evidence of human-level general intelligence;
+- proof that biological and digital intelligence are identical.
 
-This framework enables investigating:
+The scientific claim is narrower:
 
-- **Structure-function relationships**: How does connectome topology constrain learnable behaviors?
-- **Dimorphism & specialization**: Do male-specific circuits (pC1, LoVP92 hotspots) confer advantages for specific task types?
-- **Neuromodulatory gating**: Can dopamine/octopamine signals from the connectome implement credit assignment?
-- **Metalearning in biological networks**: Does MAML on connectome structure discover plasticity rules that match biology?
-- **Sensorimotor integration**: How do recurrent loops (auditory feedback, visual-motor) support closed-loop control?
-
-## Expected Challenges
-
-| Challenge | Mitigation |
-|---|---|
-| 166K neurons too large for full simulation | Sensorimotor subgraph extraction (3-5K neurons) |
-| Brian2 on Windows/CUDA issues | Rate-coded differentiable SNN as alternative |
-| Sparse rewards in Mario | Reward shaping, curriculum, intrinsic motivation |
-| Sim-to-real gap (connectome vs behavior) | Focus on *circuit motifs* not whole-brain simulation |
-| Credit assignment in deep SNN | Neuromodulatory STDP, surrogate gradients |
+> A large biological connectome can be represented digitally as a sparse recurrent network and can support measurable task-specific adaptive behavior.
 
 ## Citation
 
-If you use this framework, please cite:
+If you use this project or its experiments, please cite the repository and the underlying connectome work.
 
 ```bibtex
-@article{berg2026malecns,
-  title={Sexual dimorphism in the complete Drosophila male central nervous system connectome},
-  author={Berg, Stuart and Beckett, Isabella R and Costa, Marta and Schlegel, Philipp and others},
-  journal={Cell},
-  volume={189},
-  pages={5504--5526},
-  year={2026},
-  doi={10.1016/j.cell.2026.08.015}
+@software{metabrain2026,
+  title        = {Meta-Brain: Full-connectome-inspired reinforcement learning with the Drosophila connectome},
+  author       = {Soranço, Matheus},
+  year         = {2026},
+  url          = {https://github.com/Matheussoranco/Meta-Brain}
 }
 ```
 
 ```bibtex
-@software{meta-brain,
-  title={Meta-Brain: Metalearning on Drosophila Connectome for Mario Bros},
-  author={Soranço, Matheus},
-  year={2026},
-  url={https://github.com/matheuss/meta-brain}
+@article{berg2026malecns,
+  title   = {Sexual dimorphism in the complete Drosophila male central nervous system connectome},
+  journal = {Cell},
+  year    = {2026},
+  doi     = {10.1016/j.cell.2026.08.015}
 }
 ```
 
 ## License
 
-MIT License — see LICENSE file.
+MIT License.
 
-## Acknowledgments
+## Acknowledgements
 
-- **Janelia FlyEM Team** for the MaleCNS connectome
-- **FlyWire Consortium** for female brain connectome (comparison)
-- **NeuPrint** team for programmatic access
-- **Nous Research** for Hermes Agent infrastructure
+- Janelia FlyEM Team
+- MaleCNS connectome project
+- neuPrint and FlyWire communities
+- Researchers developing Gym, reinforcement learning and spiking neural network tooling
 
 ---
 
-*Built with I.S.A.A.C. — Intelligent Synthetic Autonomous Agent Companion*
+Built with I.S.A.A.C. — Intelligent Synthetic Autonomous Agent Companion.
