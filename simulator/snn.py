@@ -257,70 +257,76 @@ class DrosophilaSNN:
         print("Brian2 network built successfully")
     
     def _add_stdp(self):
-            """Add STDP plasticity to synapses."""
-            import brian2 as b2
+        """Add STDP plasticity to synapses."""
+        import brian2 as b2
 
-            stdp_config = self.sim_config['plasticity']
+        stdp_config = self.sim_config['plasticity']
 
-            # Rewrite the synapse model with STDP included
-            # We need to recreate the synapses with the extended model
-            stdp_eqs = '''
-            dApre/dt = -Apre / tau_plus : 1 (event-driven)
-            dApost/dt = -Apost / tau_minus : 1 (event-driven)
-            '''
+        # Rewrite the synapse model with STDP included
+        # We need to recreate the synapses with the extended model
+        stdp_eqs = '''
+        dApre/dt = -Apre / tau_plus : 1 (event-driven)
+        dApost/dt = -Apost / tau_minus : 1 (event-driven)
+        '''
 
-            stdp_on_pre = '''
-            Apre += a_plus
-            w = clip(w + Apost, 0*siemens, wmax)
-            '''
+        stdp_on_pre = '''
+        Apre += a_plus
+        w = clip(w + Apost, 0*siemens, wmax)
+        '''
 
-            stdp_on_post = '''
-            Apost += a_minus
-            w = clip(w + Apre, 0*siemens, wmax)
-            '''
+        stdp_on_post = '''
+        Apost += a_minus
+        w = clip(w + Apre, 0*siemens, wmax)
+        '''
 
-            # Create new synapses with STDP
-            self.synapses = b2.Synapses(self.neuron_group, self.neuron_group,
-                                        model='''w : siemens
-                                                 tau_syn : second
-                                                 is_excitatory : boolean
-                                                 Ee : volt
-                                                 Ei : volt
-                                                 Apre : 1
-                                                 Apost : 1
-                                                 tau_plus : second
-                                                 tau_minus : second
-                                                 a_plus : 1
-                                                 a_minus : 1
-                                                 wmax : siemens''' + stdp_eqs,
-                                        on_pre='''
-                                        I_syn_e_post += w * is_excitatory * (Ee - v_post)
-                                        I_syn_i_post += w * (1 - is_excitatory) * (Ei - v_post)
-                                        ''' + stdp_on_pre,
-                                        on_post=stdp_on_post,
-                                        delay=1.0 * b2.ms)
+        # Create new synapses with STDP
+        self.synapses = b2.Synapses(self.neuron_group, self.neuron_group,
+                                    model='''w : siemens
+                                             tau_syn : second
+                                             is_excitatory : boolean
+                                             Ee : volt
+                                             Ei : volt
+                                             Apre : 1
+                                             Apost : 1
+                                             tau_plus : second
+                                             tau_minus : second
+                                             a_plus : 1
+                                             a_minus : 1
+                                             wmax : siemens''' + stdp_eqs,
+                                    on_pre='''
+                                    I_syn_e_post += w * is_excitatory * (Ee - v_post)
+                                    I_syn_i_post += w * (1 - is_excitatory) * (Ei - v_post)
+                                    ''' + stdp_on_pre,
+                                    on_post=stdp_on_post,
+                                    delay=1.0 * b2.ms)
 
-            # Reconnect
-            pre_indices = [self.id_to_index[s.pre] for s in self.synapse_params]
-            post_indices = [self.id_to_index[s.post] for s in self.synapse_params]
-            weights = [s.weight * weight_scale for s in self.synapse_params]
-            is_exc = [s.neurotransmitter in [Neurotransmitter.ACETYLCHOLINE] for s in self.synapse_params]
+        # Reconnect
+        pre_indices = [self.id_to_index[s.pre] for s in self.synapse_params]
+        post_indices = [self.id_to_index[s.post] for s in self.synapse_params]
+        
+        # Get weight_scale, Ee, Ei from sim_config
+        weight_scale = self.sim_config['synapse_weight_scale'] * b2.nS
+        Ee = 0 * b2.mV    # Excitatory reversal (ACh)
+        Ei = -70 * b2.mV  # Inhibitory reversal (GABA/Glu)
 
-            self.synapses.connect(i=pre_indices, j=post_indices)
-            self.synapses.w = weights
-            self.synapses.is_excitatory = is_exc
-            self.synapses.Ee = Ee
-            self.synapses.Ei = Ei
-            self.synapses.tau_syn = self.sim_config['synaptic_time_constant'] * b2.ms
+        weights = [s.weight * weight_scale for s in self.synapse_params]
+        is_exc = [s.neurotransmitter in [Neurotransmitter.ACETYLCHOLINE] for s in self.synapse_params]
 
-            # Initialize STDP variables
-            self.synapses.Apre = 0
-            self.synapses.Apost = 0
-            self.synapses.tau_plus = stdp_config['stdp_tau_plus'] * b2.ms
-            self.synapses.tau_minus = stdp_config['stdp_tau_minus'] * b2.ms
-            self.synapses.a_plus = stdp_config['stdp_a_plus']
-            self.synapses.a_minus = -stdp_config['stdp_a_minus']
-            self.synapses.wmax = 10 * b2.nS
+        self.synapses.connect(i=pre_indices, j=post_indices)
+        self.synapses.w = weights
+        self.synapses.is_excitatory = is_exc
+        self.synapses.Ee = Ee
+        self.synapses.Ei = Ei
+        self.synapses.tau_syn = self.sim_config['synaptic_time_constant'] * b2.ms
+
+        # Initialize STDP variables
+        self.synapses.Apre = 0
+        self.synapses.Apost = 0
+        self.synapses.tau_plus = stdp_config['stdp_tau_plus'] * b2.ms
+        self.synapses.tau_minus = stdp_config['stdp_tau_minus'] * b2.ms
+        self.synapses.a_plus = stdp_config['stdp_a_plus']
+        self.synapses.a_minus = -stdp_config['stdp_a_minus']
+        self.synapses.wmax = 10 * b2.nS
     
     def inject_sensory_input(self, sensory_rates: Dict[int, float], duration: float):
         """
@@ -378,45 +384,49 @@ class DrosophilaSNN:
                     self.neuron_group.I_ext[idx] = 0 * b2.pA
     
     def get_motor_output(self, time_window: float = None) -> Dict[int, float]:
-        """
-        Get motor neuron firing rates.
+            """
+            Get motor neuron firing rates.
+
+            Returns:
+                Dict mapping motor neuron_id -> firing rate (Hz)
+            """
+            import brian2 as b2
         
-        Returns:
-            Dict mapping motor neuron_id -> firing rate (Hz)
-        """
-        if time_window is None:
-            time_window = self.sim_config['simulation_time']
-        
-        spike_mon = self.spike_monitors['all']
-        rates = {}
-        
-        for midx in self.motor_indices:
-            nid = self.index_to_id[midx]
-            spikes = spike_mon.t[spike_mon.i == midx]
-            if len(spikes) > 0:
-                # Filter to time window
-                recent_spikes = spikes[spikes > (spike_mon.t[-1] - time_window * b2.ms)]
-                rates[nid] = len(recent_spikes) / (time_window / 1000.0)  # Hz
-            else:
-                rates[nid] = 0.0
-        
-        return rates
+            if time_window is None:
+                time_window = self.sim_config['simulation_time']
+
+            spike_mon = self.spike_monitors['all']
+            rates = {}
+
+            for midx in self.motor_indices:
+                nid = self.index_to_id[midx]
+                spikes = spike_mon.t[spike_mon.i == midx]
+                if len(spikes) > 0:
+                    # Filter to time window
+                    recent_spikes = spikes[spikes > (spike_mon.t[-1] - time_window * b2.ms)]
+                    rates[nid] = len(recent_spikes) / (time_window / 1000.0)  # Hz
+                else:
+                    rates[nid] = 0.0
+
+            return rates
     
     def get_spike_trains(self, neuron_ids: List[int] = None) -> Dict[int, np.ndarray]:
-        """Get spike times for specified neurons."""
-        spike_mon = self.spike_monitors['all']
+            """Get spike times for specified neurons."""
+            import brian2 as b2
         
-        if neuron_ids is None:
-            neuron_ids = list(self.id_to_index.keys())
-        
-        trains = {}
-        for nid in neuron_ids:
-            if nid in self.id_to_index:
-                idx = self.id_to_index[nid]
-                spikes = spike_mon.t[spike_mon.i == idx]
-                trains[nid] = np.array(spikes / b2.ms)
-        
-        return trains
+            spike_mon = self.spike_monitors['all']
+
+            if neuron_ids is None:
+                neuron_ids = list(self.id_to_index.keys())
+
+            trains = {}
+            for nid in neuron_ids:
+                if nid in self.id_to_index:
+                    idx = self.id_to_index[nid]
+                    spikes = spike_mon.t[spike_mon.i == idx]
+                    trains[nid] = np.array(spikes / b2.ms)
+
+            return trains
     
     def set_plasticity(self, enabled: bool):
         """Enable or disable STDP plasticity."""

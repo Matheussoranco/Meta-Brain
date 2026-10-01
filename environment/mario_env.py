@@ -39,66 +39,63 @@ class MarioEnv:
     """
     
     def __init__(self, config_path: str = "config/config.yaml"):
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
-        
-        self.env_config = self.config['environment']
-        
-        # Import gym-super-mario-bros
-        try:
-            import gym_super_mario_bros
-            from nes_py.wrappers import JoypadSpace
-            from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
-        except ImportError:
-            raise ImportError("gym-super-mario-bros not installed. Run: pip install gym-super-mario-bros nes-py")
-        
-        # Create base environment
-        self.env = gym_super_mario_bros.make(self.env_config['name'])
-        
-        # Action space wrapper
-        actions = self.env_config['actions']
-        self.env = JoypadSpace(self.env, actions)
-        
-        # Wrappers for preprocessing
-        self._setup_wrappers()
-        
-        # Action and observation spaces
-        self.action_space = self.env.action_space
-        self.observation_space = self.env.observation_space
-        
-        # Episode tracking
-        self.episode_count = 0
-        self.step_count = 0
-        self.total_reward = 0.0
-        
-        # Frame stack
-        self.frame_stack = self.env_config['frame_stack']
-        self.frames = []
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+
+            self.env_config = self.config['environment']
+
+            # Import gym-super-mario-bros
+            try:
+                import gym_super_mario_bros
+                from nes_py.wrappers import JoypadSpace
+                from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
+            except ImportError:
+                raise ImportError("gym-super-mario-bros not installed. Run: pip install gym-super-mario-bros nes-py")
+
+            # Create base environment
+            self.env = gym_super_mario_bros.make(self.env_config['name'])
+
+            # Action space wrapper
+            actions = self.env_config['actions']
+            self.env = JoypadSpace(self.env, actions)
+
+            # Frame stack
+            self.frame_stack = self.env_config['frame_stack']
+            self.frames = []
+
+            # Wrappers for preprocessing
+            self._setup_wrappers()
+
+            # Action and observation spaces
+            self.action_space = self.env.action_space
+            self.observation_space = self.env.observation_space
+
+            # Episode tracking
+            self.episode_count = 0
+            self.step_count = 0
+            self.total_reward = 0.0
         
     def _setup_wrappers(self):
-        """Setup preprocessing wrappers."""
-        from gymnasium.wrappers import (
-            FrameStackObservation,
-            ResizeObservation,
-            GrayScaleObservation,
-            TransformObservation,
-        )
-        
-        # Resize
-        self.env = ResizeObservation(self.env, self.env_config['resize'])
-        
-        # Grayscale
-        if self.env_config['grayscale']:
-            self.env = GrayScaleObservation(self.env, keep_dim=True)
-        
-        # Frame stack
-        self.env = FrameStackObservation(self.env, self.frame_stack)
-        
-        # Reward scaling
-        self.env = TransformObservation(
-            self.env,
-            lambda obs: obs.astype(np.float32) / 255.0
-        )
+            """Setup preprocessing wrappers."""
+            from gymnasium.wrappers import (
+                FrameStackObservation,
+                ResizeObservation,
+                GrayScaleObservation,
+                TransformObservation,
+            )
+
+            # Resize
+            self.env = ResizeObservation(self.env, self.env_config['resize'])
+
+            # Grayscale
+            if self.env_config['grayscale']:
+                self.env = GrayScaleObservation(self.env, keep_dim=True)
+
+            # Frame stack
+            self.env = FrameStackObservation(self.env, self.frame_stack)
+
+            # Reward scaling (applied in step method, not as observation transform)
+            # We'll handle reward scaling in step() instead
     
     def reset(self, seed: int = None) -> Tuple[np.ndarray, Dict]:
         """Reset environment."""
@@ -115,20 +112,23 @@ class MarioEnv:
         return obs, info
     
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        """Step environment."""
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # Scale reward
-        reward *= self.env_config['reward_scale']
-        
-        self.step_count += 1
-        self.total_reward += reward
-        
-        # Check max episode steps
-        if self.step_count >= self.env_config['max_episode_steps']:
-            truncated = True
-        
-        return obs, reward, terminated, truncated, info
+            """Step environment."""
+            obs, reward, terminated, truncated, info = self.env.step(action)
+
+            # Scale reward
+            scaled_reward = reward * self.env_config['reward_scale']
+
+            self.step_count += 1
+            self.total_reward += scaled_reward
+
+            # Check max episode steps
+            if self.step_count >= self.env_config['max_episode_steps']:
+                truncated = True
+
+            # Add scaled reward to info for encoder
+            info['reward'] = scaled_reward
+
+            return obs, scaled_reward, terminated, truncated, info
     
     def get_state(self, info: Dict) -> MarioState:
         """Extract structured state from info dict."""
@@ -178,23 +178,23 @@ class MarioEnv:
         }
     
     def _encode_visual(self, obs: np.ndarray) -> np.ndarray:
-        """Encode visual frame for optic lobe input."""
-        # obs shape: (frame_stack, H, W) or (frame_stack, H, W, 1)
-        if obs.ndim == 4:
-            obs = obs.squeeze(-1)
-        
-        # Downsample further for connectome input
-        # Use max pooling to preserve important features
-        from skimage.measure import block_reduce
-        try:
-            visual = block_reduce(obs[-1], block_size=(4, 4), func=np.max)
-        except ImportError:
-            # Simple downsampling
-            visual = obs[-1, ::4, ::4]
-        
-        # Normalize
-        visual = visual.astype(np.float32) / 255.0
-        return visual.flatten()
+            """Encode visual frame for optic lobe input."""
+            # obs shape: (frame_stack, H, W) or (frame_stack, H, W, 1)
+            # The observation has already been normalized to [0, 1] by the wrapper
+            if obs.ndim == 4:
+                obs = obs.squeeze(-1)
+
+            # Downsample further for connectome input
+            # Use max pooling to preserve important features
+            from skimage.measure import block_reduce
+            try:
+                visual = block_reduce(obs[-1], block_size=(4, 4), func=np.max)
+            except ImportError:
+                # Simple downsampling
+                visual = obs[-1, ::4, ::4]
+
+            # Already normalized by wrapper, just flatten
+            return visual.flatten()
     
     def _encode_proprioception(self, state: MarioState) -> np.ndarray:
         """Encode proprioceptive state."""

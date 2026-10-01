@@ -24,7 +24,7 @@ connectome:
     - "descending_neuron"   # Brain-to-VNC output (primary motor command)
     - "vnc_motor"           # VNC motor neurons
     - "cb_motor"            # Central brain motor
-  interneuron_types:
+  interneuron_types_superclasses:
     - "ol_intrinsic"        # Optic lobe intrinsic
     - "cb_intrinsic"        # Central brain intrinsic
     - "vnc_intrinsic"       # VNC intrinsic
