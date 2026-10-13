@@ -14,7 +14,7 @@ setup(
     description="Metalearning on Drosophila Male CNS Connectome for Mario Bros",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/matheuss/meta-brain",
+    url="https://github.com/Matheussoranco/Meta-Brain",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

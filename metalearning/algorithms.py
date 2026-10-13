@@ -680,7 +680,8 @@ class DifferentiableSNN(nn.Module):
 def create_differentiable_snn_from_connectome(graph,
                                                sensory_ids: List[int],
                                                motor_ids: List[int],
-                                               config_path: str = "config/config.yaml") -> DifferentiableSNN:
+                                               config_path: str = "config/config.yaml",
+                                               max_dense_bytes: int = 256 * 1024 * 1024) -> DifferentiableSNN:
     """Create differentiable SNN from connectome graph."""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -691,6 +692,20 @@ def create_differentiable_snn_from_connectome(graph,
     all_ids = list(graph.neurons.keys())
     id_to_idx = {nid: i for i, nid in enumerate(all_ids)}
     n_neurons = len(all_ids)
+
+    # Dense connectivity, weights, gradients and optimizer state require O(N²)
+    # storage. This budget excludes activations and is a lower bound, not a
+    # guarantee that a particular training run fits in memory.
+    if type(max_dense_bytes) is not int or max_dense_bytes <= 0:
+        raise ValueError("max_dense_bytes must be a positive integer")
+    required_bytes = 24 * n_neurons * n_neurons + 4 * n_neurons * (len(sensory_ids) + len(motor_ids))
+    if n_neurons == 0:
+        raise ValueError("Connectome must contain at least one neuron")
+    if required_bytes > max_dense_bytes:
+        raise ValueError(
+            f"Dense SNN requires at least {required_bytes:,} bytes; budget is "
+            f"{max_dense_bytes:,}. Use a smaller subgraph or the sparse full-brain implementation."
+        )
 
     # Build connectivity matrix
     connectivity = torch.zeros(n_neurons, n_neurons)
