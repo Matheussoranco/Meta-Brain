@@ -26,16 +26,18 @@ The project has two experimental tracks:
    - MaleCNS metadata loaded with `211,577` neurons.
    - Full-scale sparse recurrent execution on CUDA.
    - Visual input from game frames.
-   - Motor readout trained with policy-gradient reinforcement learning.
+   - Motor readout trained with reinforcement learning (PPO since the October 2026 rework).
    - Some training episodes reached approximately `x=1,800` in World 1-1.
    - Final deterministic evaluation reached approximately `x=314` on average.
    - Final evaluation did not yet reach the flag: `success_rate=0`, `flag_get=false`, and all five evaluation episodes ended in death.
 
 The Mario result should therefore be described as successful partial behavioral learning, not yet as robust level completion.
 
+> **These Mario numbers need to be regenerated.** They cannot be reproduced from the repository: the artifacts below were never committed, and the notebook as previously committed did not match the real MaleCNS v1.0 files. It looked for the wrong edge columns, ignored the neurotransmitter table (so every synapse was excitatory), and did not filter `Traced` bodies (211,577 annotated bodies instead of 165,122). The notebook and `scripts/full_brain_mario_v2.py` now use the `meta_brain.graph` loader. Rerun the notebook before citing any Mario result.
+
 ## Demonstration artifacts
 
-The repository can include the following experiment artifacts:
+A run of the notebook produces the following artifacts (copy them into `assets/` to publish them; none are committed yet):
 
 - [Pre-training Mario video](assets/full_brain_mario_v2_pre.mp4)
 - [Post-training Mario video](assets/full_brain_mario_v2_post.mp4)
@@ -62,9 +64,9 @@ The videos show the best recorded evaluation episode, selected by:
               v
 +---------------------------+
 | Visual encoding           |
-| 16x16 grayscale image    |
+| 32x32 grayscale playfield |
 | + frame difference        |
-| 512-dimensional code      |
+| 2048-dimensional code     |
 +-------------+-------------+
               |
               v
@@ -86,7 +88,7 @@ The videos show the best recorded evaluation episode, selected by:
 +---------------------------+
 | Motor readout             |
 | Descending / motor cells  |
-| Trainable policy logits   |
+| Trainable policy + value  |
 +-------------+-------------+
               |
               v
@@ -121,23 +123,22 @@ The connectome structure and sensory projection are frozen during the Mario expe
 
 ## Learning procedure
 
-The Mario experiment uses episodic policy-gradient reinforcement learning.
+The Mario experiment trains the motor readout with PPO (`meta_brain/mario_rl.py`).
 
-For each episode:
+1. Eight emulators run in lockstep. Each agent step repeats the chosen action for 4 NES frames, so jumps can be held.
+2. Every step, the current frame (32x32 grayscale playfield) and its frame difference drive the sensory neurons through a fixed random projection. The connectome dynamics then advance 2 micro-steps.
+3. Motor-neuron activity is standardized with statistics from a random-action warm-up. Linear policy and value heads read it.
+4. After 128 steps per emulator, PPO (GAE, clipped ratio, entropy bonus) updates the two heads. Because the reservoir is frozen, the stored features are reused across epochs.
+5. An episode ends when Mario dies, reaches the flag, or makes no progress for 60 agent steps. Random no-op starts make episodes differ.
+6. Evaluation runs 10 greedy episodes before and after training. Videos of the best ones are encoded as H.264.
 
-1. Reset the game.
-2. Encode the current frame and frame difference.
-3. Propagate activity through the sparse connectome.
-4. Sample an action from the motor readout policy.
-5. Receive the game reward.
-6. Compute discounted returns.
-7. Update the motor readout using policy gradients.
+The first full run with the previous setup did not learn: the reward curve was flat and post-training evaluation died at the first Goomba. That setup changed the action every frame and used one-episode REINFORCE without a baseline, and its `mp4v` videos did not play in browsers.
 
 The current experiment is therefore best described as:
 
 > Frozen connectome reservoir + trainable motor readout + visual reinforcement learning.
 
-It is not yet a full MAML experiment. The repository contains MAML and related metalearning components, but the Mario result reported here is driven primarily by policy-gradient optimization of the readout.
+It is not yet a full MAML experiment. The repository contains MAML and related metalearning components, but the Mario result is driven by reinforcement learning of the readout only.
 
 ## Reproducing the self-contained Colab experiment
 
@@ -225,6 +226,21 @@ Meta-Brain/
 ├── setup.py
 └── README.md
 ```
+
+## Connectome-constrained training infrastructure
+
+Groundwork for training cell-type parameters through the full connectome:
+
+- `meta_brain/graph.py`: vectorized MaleCNS v1.0 loader for the three flat-connectome files. It keeps `Traced` bodies, joins the neurotransmitter table, streams the ~152M-row weights table by Arrow record batch, remaps body ids with NumPy, sums any repeated pairs (none in v1.0) and caches the result under `data/connectome/cache/`. A `LoadReport` accounts for every edge row (retained, dropped or merged), and cell-type and type-pair indices come with the graph.
+- `meta_brain/shuffle.py`: null-model controls. Includes a degree-preserving shuffle, a type-preserving shuffle (keeps the type-to-type connectivity table and per-block degrees) and a random sparse graph of matching size.
+- `meta_brain/sparse_ops.py`: `sparse_propagate`, a CSR propagation with a custom backward. It saves only the `N x B` activation per call instead of an `E x B` edge tensor, so BPTT over many micro-steps fits in memory.
+
+```bash
+python scripts/build_graph_cache.py --data-dir data/connectome
+python scripts/benchmark_sparse_propagate.py --sweep --frames 4 --micro-steps 8 --batch 8
+```
+
+[`notebooks/colab_m0_m1_infrastructure.ipynb`](notebooks/colab_m0_m1_infrastructure.ipynb) runs all of this on Colab without cloning the repository: it downloads MaleCNS v1.0, builds and audits the graph, generates and checks the controls, verifies and benchmarks `sparse_propagate` on the full graph, and saves plots, CSVs and `m0_m1_results.json`. The library code in it is generated from `meta_brain/`; after changing those modules, run `python scripts/build_colab_m0_m1_notebook.py`.
 
 ## Research questions
 

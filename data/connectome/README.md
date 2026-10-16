@@ -22,12 +22,13 @@ Requires `gsutil` (Google Cloud SDK) for fastest downloads:
 
 Visit the official download page: **https://male-cns.janelia.org/download/**
 
-Key files for Meta-Brain:
+Key files for Meta-Brain (`meta_brain.graph` also still accepts the older `*meta*.feather` + `*simple*edgelist*.feather` layout):
 
 | File | Description | Size | Required |
 |------|-------------|------|----------|
-| `malecns_v1_0_meta.feather` | Neuron metadata (type, position, NT, etc.) | ~10 MB | **Yes** |
-| `malecns_v1_0_simple_edgelist.feather` | Neuron-to-neuron connectivity | ~3.2 GB | **Yes** |
+| `body-annotations-male-cns-v1.0-minconf-0.5.feather` | Body annotations (`bodyId`, `status`, `type`, `superclass`, ...) | ~13 MB | **Yes** |
+| `body-neurotransmitters-male-cns-v1.0.feather` | Per-body NT predictions (`body`, `consensus_nt`, `predicted_nt`) | ~42 MB | **Yes** |
+| `connectome-weights-male-cns-v1.0-minconf-0.5.feather` | Weighted connectivity (`body_pre`, `body_post`, `weight`), ~152M rows, one per connected body pair (most involve untraced fragments) | ~1.1 GB | **Yes** |
 | `malecns_v1_0_split_edgelist.feather` | Compartment-level connectivity | ~4.6 GB | Optional |
 | `malecns_v1_0_synapses.parquet` | Individual synapse locations | ~7.9 GB | Optional |
 | `malecns_malecns_space_swc/` | Skeletons in native space | ~2 GB | Optional |
@@ -49,8 +50,10 @@ Get token from: https://neuprint.janelia.org → Account → Token
 
 ```
 data/connectome/
-├── malecns_v1_0_meta.feather
-├── malecns_v1_0_simple_edgelist.feather
+├── body-annotations-male-cns-v1.0-minconf-0.5.feather
+├── body-neurotransmitters-male-cns-v1.0.feather
+├── connectome-weights-male-cns-v1.0-minconf-0.5.feather
+├── cache/ (built by meta_brain.graph.load_connectome)
 ├── malecns_v1_0_split_edgelist.feather (optional)
 ├── malecns_v1_0_synapses.parquet (optional)
 ├── malecns_malecns_space_swc/ (optional)

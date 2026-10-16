@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies for the core suite (not the Mario application)
-        run: python -m pip install numpy scipy pandas pyyaml torch networkx pytest
+        run: python -m pip install numpy scipy pandas pyarrow pyyaml torch networkx matplotlib pytest
       - run: python -m pip check
       - name: Core numerics and dense allocation budget
         run: python -m pytest tests -q

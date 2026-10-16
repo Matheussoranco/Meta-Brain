@@ -23,6 +23,7 @@ data/connectome/*.parquet
 data/connectome/*.npz
 data/connectome/*_space_swc/
 data/connectome/obj/
+data/connectome/cache/
 
 # Checkpoints and models
 checkpoints/
