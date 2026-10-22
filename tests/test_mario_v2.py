@@ -78,6 +78,7 @@ def test_whole_notebook_runs_with_a_fake_emulator(release, monkeypatch, tmp_path
 
     for key, value in {"MB_DEVICE": "cpu", "MB_MARIO_ENVS": "2", "MB_MARIO_UPDATES": "2",
                        "MB_MARIO_EVAL": "2", "MB_MARIO_MICRO_STEPS": "1", "MB_PROBE_EPISODES": "4",
+                       "MB_SWEEP_EPISODES": "3", "MB_RUN_SWEEP": "1", "MB_SWEEP_GAINS": "0.5,1.6", "MB_SWEEP_INPUT_GAINS": "1",
                        "MB_MARIO_CONDITIONS": "real,zero,clock"}.items():
         monkeypatch.setenv(key, value)
     namespace = {"__name__": "__main__"}
@@ -94,6 +95,7 @@ def test_whole_notebook_runs_with_a_fake_emulator(release, monkeypatch, tmp_path
         assert results["vision"] == condition
         assert results["claim_status"] == "RUN_COMPLETED_BUT_SUCCESS_NOT_DEMONSTRATED"
         assert results["graph"]["neurons"] == 560
+        assert results["settings"]["gain"] == 0.5
         assert results["training"]["agent_steps"] == 2 * 128 * 2
         for name in ("pre.mp4", "post.mp4", "post_sampled.mp4", "curves.png", "results.json"):
             assert (out / condition / f"full_brain_mario_v2_{name}").stat().st_size > 0
@@ -105,6 +107,12 @@ def test_whole_notebook_runs_with_a_fake_emulator(release, monkeypatch, tmp_path
     probe = namespace["PROBE"]
     assert probe["episodes"] == 4 and set(probe["scores"]) == {"goomba_dx", "goomba_near", "pipe_dx", "mario_x"}
     assert (out / "mario_probe.png").stat().st_size > 0 and (out / "mario_probe.json").stat().st_size > 0
+    layers = [r["layer"] for r in namespace["LAYER_PROBE"]["layers"]]
+    assert layers == ["ol_sensory", "ol_intrinsic", "cb_intrinsic", "descending_neuron"]  # no visual_projection here
+    assert (out / "mario_layer_probe.png").stat().st_size > 0
+    sweep = namespace["SWEEP"]
+    assert {r["config"] for r in sweep["rows"]} == {"gain=0.5,input=1", "gain=1.6,input=1"}
+    assert (out / "mario_sweep_probe.png").stat().st_size > 0 and (out / "mario_sweep_probe.json").stat().st_size > 0
     assert (tmp_path / "out.zip").stat().st_size > 0
 
 

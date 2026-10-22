@@ -222,6 +222,26 @@ def test_vision_controls_compare(tmp_path):
     assert (tmp_path / "mario_vision_controls.json").stat().st_size > 0
 
 
+def test_gain_defaults_and_settings_reach_the_reservoir():
+    from dataclasses import replace
+
+    from meta_brain.mario_rl import MarioSettings
+
+    s, w = small_graph()
+    assert ConnectomeReservoir(s, w, np.arange(60), np.arange(240, 300), code_dim((8, 8))).gain == 0.5
+    assert MarioSettings().gain == 0.5 and MarioSettings().input_gain == 1.0
+    codes = torch.randn(2, code_dim((8, 8)))
+    outs = {}
+    for g in (0.5, 1.6):
+        res = ConnectomeReservoir(s, w, np.arange(60), np.arange(240, 300), code_dim((8, 8)), gain=g)
+        state = res.initial_state(2)
+        for _ in range(5):
+            feats, state = res.step(codes, state)
+        outs[g] = feats
+    assert not torch.allclose(outs[0.5], outs[1.6])
+    assert replace(MarioSettings(), gain=1.6).gain == 1.6
+
+
 def test_run_experiment_writes_all_artifacts(tmp_path):
     import matplotlib
 

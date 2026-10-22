@@ -102,6 +102,89 @@ def test_probe_end_to_end(tmp_path):
     assert (tmp_path / "probe.png").stat().st_size > 0
 
 
+class FakeGraph:
+    def __init__(self, superclass):
+        self.superclass = np.asarray(superclass)
+
+    def superclass_mask(self, names):
+        return np.isin(self.superclass, list(names))
+
+
+def test_layer_indices_subsample_and_skip_missing():
+    from meta_brain.mario_probe import layer_indices
+
+    g = FakeGraph(["ol_sensory"] * 50 + ["ol_intrinsic"] * 10 + ["cb_intrinsic"] * 5)
+    layers = layer_indices(g, ("ol_sensory", "ol_intrinsic", "visual_projection"), max_per_layer=20, seed=0)
+    assert list(layers) == ["ol_sensory", "ol_intrinsic"]  # missing superclass skipped, order kept
+    assert len(layers["ol_sensory"]) == 20 and set(layers["ol_sensory"]) <= set(range(50))
+    assert layers["ol_intrinsic"].tolist() == list(range(50, 60))
+    np.testing.assert_array_equal(layers["ol_sensory"], np.sort(layers["ol_sensory"]))
+
+
+def test_layer_probe_finds_signal_in_driven_layer(tmp_path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from meta_brain.mario_probe import plot_layer_probe, run_layer_probe
+
+    res = small_reservoir()  # sensory = 0..59 (driven by the frame), motor = 240..299
+    runner = MarioRunner(FakeSMB(seed=3), frame_skip=2, noop_max=4, stuck_steps=100, max_steps=200, seed=0)
+    layers = {"sensory": np.arange(0, 60), "middle": np.arange(100, 160), "motor": np.arange(240, 300)}
+    data = collect_probe_dataset(runner, res, episodes=12, size=(8, 8), seed=0, layers=layers)
+    assert data["layer:sensory:real"].shape == (len(data["step"]), 60)
+    np.testing.assert_allclose(data["layer:motor:real"], data["motor_real"], atol=1e-6)
+    result = run_layer_probe(data, layer_sizes={"sensory": 60})
+    assert [r["layer"] for r in result["layers"]] == ["sensory", "middle", "motor"]
+    sensory = result["layers"][0]
+    assert sensory["neurons_total"] == 60 and sensory["goomba_dx_signal"] > 0.2
+    assert result["targets"] == {"goomba_dx": "r2", "goomba_near": "auc"}
+    plot_layer_probe(result, tmp_path / "layers.png", ceiling={"goomba_dx": 0.9})
+    assert (tmp_path / "layers.png").stat().st_size > 0
+
+
+def test_sweep_matches_single_config_and_restores_reservoir():
+    from meta_brain.mario_probe import collect_sweep_dataset
+
+    layers = {"sensory": np.arange(0, 60), "motor": np.arange(240, 300)}
+    res = small_reservoir()
+    res.gain, res.input_gain = 1.6, 1.0
+
+    def runner():
+        return MarioRunner(FakeSMB(seed=3), frame_skip=2, noop_max=4, stuck_steps=100, max_steps=60, seed=0)
+
+    single = collect_probe_dataset(runner(), res, episodes=3, size=(8, 8), seed=0, layers=layers)
+    sweep = collect_sweep_dataset(runner(), res, [(0.5, 4.0), (1.6, 1.0)], layers, episodes=3, size=(8, 8), seed=0)
+    assert res.gain == 1.6 and res.input_gain == 1.0  # restored
+    for side in ("real", "clock"):
+        np.testing.assert_allclose(sweep[f"cfg1:layer:motor:{side}"], single[f"layer:motor:{side}"], atol=1e-5)
+    assert not np.allclose(sweep["cfg0:layer:motor:real"], sweep["cfg1:layer:motor:real"])
+    np.testing.assert_array_equal(sweep["episode"], single["episode"])
+    for name in layers:
+        assert sweep["regime"][name]["mean_abs"].shape == (2,)
+        assert ((0 <= sweep["regime"][name]["saturated"]) & (sweep["regime"][name]["saturated"] <= 1)).all()
+
+
+def test_sweep_probe_rows_and_plot(tmp_path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from meta_brain.mario_probe import (collect_sweep_dataset, plot_sweep_probe, run_sweep_probe,
+                                        sweep_configs)
+
+    configs = sweep_configs(gains=(0.5, 1.6), input_gains=(1.0, 4.0))
+    assert configs == [(0.5, 1.0), (1.6, 1.0), (0.5, 4.0), (1.6, 4.0)]
+    runner = MarioRunner(FakeSMB(seed=3), frame_skip=2, noop_max=4, stuck_steps=100, max_steps=200, seed=0)
+    layers = {"sensory": np.arange(0, 60), "middle": np.arange(100, 160), "motor": np.arange(240, 300)}
+    data = collect_sweep_dataset(runner, small_reservoir(), configs, layers, episodes=10, size=(8, 8))
+    result = run_sweep_probe(data)
+    assert len(result["rows"]) == len(configs) * 3 and result["layers"] == ["sensory", "middle", "motor"]
+    assert set(result["deepest_layer_with_signal"]) == {f"gain={g:g},input={i:g}" for g, i in configs}
+    driven = [r for r in result["rows"] if r["layer"] == "sensory"]
+    assert all(r["signal"] > 0.05 for r in driven)  # the driven layer always sees the Goomba
+    plot_sweep_probe(result, tmp_path / "sweep.png")
+    assert (tmp_path / "sweep.png").stat().st_size > 0
+
+
 def test_probe_handles_missing_targets():
     data = {k: np.zeros(10, np.float32) for k in ("mario_x", "goomba_near", "pipe_dx")}
     data.update(goomba_dx=np.full(10, np.nan, np.float32), step=np.arange(10), episode=np.zeros(10, int),

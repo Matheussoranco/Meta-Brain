@@ -17,6 +17,10 @@ Ridge regressions, cross-validated by episode, decode each target from
 * ``motor_real`` and ``motor_clock`` (does vision reach the motor neurons?);
 * ``time``: one-hot bins of the step since reset (what elapsed time alone explains).
 
+:func:`run_layer_probe` repeats the real-vs-clock comparison for each layer of
+the visual pathway (:data:`VISUAL_PATHWAY`) to locate where the screen stops
+being decodable.
+
 If ``motor_real`` decodes the Goomba or pipe distance no better than
 ``motor_clock``, visual information is not reaching the readout, and RL on the
 readout cannot use it. Since 1-1 is deterministic, distance to the next pipe is
@@ -26,7 +30,7 @@ control are what separate seeing from counting.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -61,19 +65,51 @@ def smb_labels(env, pipes: Sequence[int] = PIPES_1_1) -> Dict[str, float]:
             "pipe_dx": float(pipe)}
 
 
+class ScriptedWalker:
+    """Walk right; now and then hold a jump for 2-6 steps, then release so the next jump can start."""
+
+    def __init__(self, seed: int = 0, jump_prob: float = 0.2, right: int = 1, jump: int = 2):
+        self.rng = np.random.default_rng(seed)
+        self.jump_prob, self.right, self.jump = jump_prob, right, jump
+        self.reset()
+
+    def reset(self) -> None:
+        self.hold = self.cooldown = 0
+
+    def act(self) -> int:
+        if self.hold > 0:
+            self.hold -= 1
+            self.cooldown = 1 if self.hold == 0 else 0
+            return self.jump
+        if self.cooldown == 0 and self.rng.random() < self.jump_prob:
+            self.hold = int(self.rng.integers(2, 7)) - 1
+            return self.jump
+        self.cooldown = 0
+        return self.right
+
+
 @torch.no_grad()
 def collect_probe_dataset(runner: MarioRunner, reservoir: ConnectomeReservoir, episodes: int = 30,
                           size=(32, 32), seed: int = 0, jump_prob: float = 0.2,
-                          right: int = 1, jump: int = 2) -> Dict[str, np.ndarray]:
-    """Scripted run through the level; returns features and RAM labels per agent step."""
-    rng = np.random.default_rng(seed)
+                          right: int = 1, jump: int = 2,
+                          layers: Optional[Dict[str, np.ndarray]] = None) -> Dict[str, np.ndarray]:
+    """Scripted run through the level; returns features and RAM labels per agent step.
+
+    ``layers`` maps a name to neuron indices (see :func:`layer_indices`); their
+    activity is recorded as ``layer:<name>:real`` and ``layer:<name>:clock``.
+    """
+    walker = ScriptedWalker(seed, jump_prob, right, jump)
     real, clock = VisualInput("real", size, seed), VisualInput("clock", size, seed)
+    layer_idx = {name: torch.as_tensor(np.asarray(idx), dtype=torch.long, device=reservoir.device)
+                 for name, idx in (layers or {}).items()}
     cols: Dict[str, List] = {k: [] for k in ("motor_real", "motor_clock", "visual_code", "step", "episode",
                                              "mario_x", "goomba_dx", "goomba_near", "pipe_dx")}
+    for name in layer_idx:
+        cols[f"layer:{name}:real"], cols[f"layer:{name}:clock"] = [], []
     for ep in range(episodes):
         obs = runner.reset()
         prev, state, done = None, reservoir.initial_state(2), False
-        hold = cooldown = 0
+        walker.reset()
         while not done:
             code_r, prev = real(obs, prev, runner.steps)
             code_c, _ = clock(obs, None, runner.steps)
@@ -83,23 +119,16 @@ def collect_probe_dataset(runner: MarioRunner, reservoir: ConnectomeReservoir, e
             labels = smb_labels(runner.env)
             cols["motor_real"].append(feats[0])
             cols["motor_clock"].append(feats[1])
+            for name, idx in layer_idx.items():
+                act = state.index_select(0, idx).float().cpu().numpy()
+                cols[f"layer:{name}:real"].append(act[:, 0])
+                cols[f"layer:{name}:clock"].append(act[:, 1])
             cols["visual_code"].append(code_r)
             cols["step"].append(runner.steps)
             cols["episode"].append(ep)
             for k, v in labels.items():
                 cols[k].append(v)
-            # Walk right; now and then hold a jump for 2-6 steps, then release so the next jump can start.
-            if hold > 0:
-                hold -= 1
-                action = jump
-                cooldown = 1 if hold == 0 else 0
-            elif cooldown == 0 and rng.random() < jump_prob:
-                hold = int(rng.integers(2, 7)) - 1
-                action = jump
-            else:
-                cooldown = 0
-                action = right
-            obs, _, done, _ = runner.step(action)
+            obs, _, done, _ = runner.step(walker.act())
     return {k: np.asarray(v, dtype=np.float32 if k not in ("step", "episode") else np.int64)
             for k, v in cols.items()}
 
@@ -216,6 +245,220 @@ def plot_probe(result: Dict, path) -> None:
     ax.set_title("What can a linear readout decode? (cross-validated by episode)")
     ax.legend(fontsize=8, ncol=4)
     ax.grid(alpha=0.25, axis="y")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+# Visual pathway from the photoreceptors to the brain's output, in order.
+VISUAL_PATHWAY = ("ol_sensory", "ol_intrinsic", "visual_projection", "cb_intrinsic", "descending_neuron")
+
+
+def layer_indices(graph, names: Sequence[str] = VISUAL_PATHWAY, max_per_layer: int = 2000,
+                  seed: int = 0) -> Dict[str, np.ndarray]:
+    """Neuron indices per superclass, randomly subsampled to at most ``max_per_layer``.
+
+    Subsampling keeps every layer's probe the same size as the motor probe
+    (about 2,000 features), so layers are compared at equal decoder capacity.
+    """
+    rng = np.random.default_rng(seed)
+    out = {}
+    for name in names:
+        idx = np.flatnonzero(graph.superclass_mask([name]))
+        if len(idx) == 0:
+            continue
+        if len(idx) > max_per_layer:
+            idx = np.sort(rng.choice(idx, max_per_layer, replace=False))
+        out[name] = idx
+    return out
+
+
+def run_layer_probe(data: Dict[str, np.ndarray], targets: Optional[Dict[str, bool]] = None,
+                    layer_sizes: Optional[Dict[str, int]] = None) -> Dict:
+    """Decode each target from each recorded layer, with real input and with the blind clock.
+
+    Layers appear in the order they were recorded (the visual pathway order).
+    ``signal`` is real minus clock: what the layer carries about the screen
+    beyond elapsed time. Where it drops to about zero is where the visual signal
+    is lost.
+    """
+    targets = targets or {"goomba_dx": False, "goomba_near": True}
+    names = [k.split(":")[1] for k in data if k.startswith("layer:") and k.endswith(":real")]
+    rows = []
+    for name in names:
+        row = {"layer": name, "neurons_probed": int(data[f"layer:{name}:real"].shape[1])}
+        if layer_sizes and name in layer_sizes:
+            row["neurons_total"] = int(layer_sizes[name])
+        for target, binary in targets.items():
+            y = data[target]
+            mask = np.isfinite(y)
+            if mask.sum() < 20 or len(np.unique(data["episode"][mask])) < 2:
+                continue
+            groups = data["episode"][mask]
+            real = ridge_cv(data[f"layer:{name}:real"][mask], y[mask], groups, binary)["score"]
+            clock = ridge_cv(data[f"layer:{name}:clock"][mask], y[mask], groups, binary)["score"]
+            row[f"{target}_real"] = round(real, 4)
+            row[f"{target}_clock"] = round(clock, 4)
+            row[f"{target}_signal"] = round(real - clock, 4)
+        rows.append(row)
+    return {"layers": rows, "targets": {t: ("auc" if b else "r2") for t, b in targets.items()}}
+
+
+def plot_layer_probe(result: Dict, path, ceiling: Optional[Dict[str, float]] = None) -> None:
+    """Real vs blind decoding along the pathway, one panel per target."""
+    import matplotlib.pyplot as plt
+
+    rows = result["layers"]
+    targets = list(result["targets"])
+    fig, axes = plt.subplots(1, len(targets), figsize=(7 * len(targets), 4.5), squeeze=False)
+    x = np.arange(len(rows))
+    labels = [r["layer"].replace("_", "\n") for r in rows]
+    for ax, target in zip(axes[0], targets):
+        real = [r.get(f"{target}_real", np.nan) for r in rows]
+        clock = [r.get(f"{target}_clock", np.nan) for r in rows]
+        ax.plot(x, real, "o-", color="#4878d0", label="real screen")
+        ax.plot(x, clock, "s--", color="#ee854a", label="blind clock")
+        ax.fill_between(x, clock, real, color="#4878d0", alpha=0.12)
+        if ceiling and target in ceiling:
+            ax.axhline(ceiling[target], color="#4c4c4c", lw=1, ls=":", label="encoded frame (ceiling)")
+        ax.set_xticks(x, labels, fontsize=8)
+        metric = result["targets"][target].upper()
+        ax.set_title(f"{target} ({metric}) along the visual pathway")
+        ax.set_ylabel(metric)
+        ax.grid(alpha=0.25)
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+# --------------------------------------------------------------------------- #
+# Dynamics sweep: does the screen get past the optic lobe at lower gain?
+# --------------------------------------------------------------------------- #
+
+def sweep_configs(gains: Sequence[float] = (0.5, 0.9, 1.2, 1.6),
+                  input_gains: Sequence[float] = (1.0, 4.0)) -> List[Tuple[float, float]]:
+    return [(float(g), float(ig)) for ig in input_gains for g in gains]
+
+
+def config_name(config: Tuple[float, float]) -> str:
+    return f"gain={config[0]:g},input={config[1]:g}"
+
+
+@torch.no_grad()
+def collect_sweep_dataset(runner: MarioRunner, reservoir: ConnectomeReservoir,
+                          configs: Sequence[Tuple[float, float]], layers: Dict[str, np.ndarray],
+                          episodes: int = 30, size=(32, 32), seed: int = 0, jump_prob: float = 0.2,
+                          right: int = 1, jump: int = 2, saturation: float = 0.9) -> Dict:
+    """One scripted run, many reservoirs: every ``(gain, input_gain)`` config sees the same frames.
+
+    Each config gets two batch columns (real screen, blind clock); ``gain`` and
+    ``input_gain`` are set per column, so a single sparse matmul advances every
+    config at once. Also records each layer's mean ``|activity|`` and the
+    fraction of saturated units (``|state| > saturation``) with the real screen.
+    """
+    walker = ScriptedWalker(seed, jump_prob, right, jump)
+    real, clock = VisualInput("real", size, seed), VisualInput("clock", size, seed)
+    dev = reservoir.device
+    n_cols = 2 * len(configs)
+    gains = torch.tensor([c[0] for c in configs for _ in (0, 1)], device=dev)
+    input_gains = torch.tensor([c[1] for c in configs for _ in (0, 1)], device=dev)
+    layer_idx = {name: torch.as_tensor(np.asarray(idx), dtype=torch.long, device=dev) for name, idx in layers.items()}
+    cols: Dict[str, List] = {k: [] for k in ("step", "episode", "mario_x", "goomba_dx", "goomba_near", "pipe_dx")}
+    for k in range(len(configs)):
+        for name in layer_idx:
+            cols[f"cfg{k}:layer:{name}:real"], cols[f"cfg{k}:layer:{name}:clock"] = [], []
+    abs_sum = {name: torch.zeros(n_cols, device=dev) for name in layer_idx}
+    sat_sum = {name: torch.zeros(n_cols, device=dev) for name in layer_idx}
+    steps = 0
+    saved = (reservoir.gain, reservoir.input_gain)
+    reservoir.gain, reservoir.input_gain = gains, input_gains
+    try:
+        for ep in range(episodes):
+            obs = runner.reset()
+            prev, state, done = None, reservoir.initial_state(n_cols), False
+            walker.reset()
+            while not done:
+                code_r, prev = real(obs, prev, runner.steps)
+                code_c, _ = clock(obs, None, runner.steps)
+                codes = np.stack([code_r, code_c] * len(configs))
+                _, state = reservoir.step(torch.as_tensor(codes, device=dev), state)
+                for name, idx in layer_idx.items():
+                    act = state.index_select(0, idx)
+                    abs_sum[name] += act.abs().mean(0)
+                    sat_sum[name] += (act.abs() > saturation).float().mean(0)
+                    act = act.float().cpu().numpy()
+                    for k in range(len(configs)):
+                        cols[f"cfg{k}:layer:{name}:real"].append(act[:, 2 * k])
+                        cols[f"cfg{k}:layer:{name}:clock"].append(act[:, 2 * k + 1])
+                for key, v in smb_labels(runner.env).items():
+                    cols[key].append(v)
+                cols["step"].append(runner.steps)
+                cols["episode"].append(ep)
+                steps += 1
+                obs, _, done, _ = runner.step(walker.act())
+    finally:
+        reservoir.gain, reservoir.input_gain = saved
+    data = {k: np.asarray(v, dtype=np.int64 if k in ("step", "episode") else np.float32) for k, v in cols.items()}
+    data["configs"] = [tuple(c) for c in configs]
+    data["regime"] = {name: {"mean_abs": (abs_sum[name] / max(steps, 1)).cpu().numpy()[0::2],
+                             "saturated": (sat_sum[name] / max(steps, 1)).cpu().numpy()[0::2]}
+                      for name in layer_idx}
+    return data
+
+
+def run_sweep_probe(data: Dict, target: str = "goomba_dx", binary: bool = False) -> Dict:
+    """Real-minus-clock decoding of ``target`` for every config and layer."""
+    names = [k.split(":")[2] for k in data if k.startswith("cfg0:layer:") and k.endswith(":real")]
+    y = data[target]
+    mask = np.isfinite(y)
+    groups = data["episode"][mask]
+    rows = []
+    for k, config in enumerate(data["configs"]):
+        for j, name in enumerate(names):
+            real = ridge_cv(data[f"cfg{k}:layer:{name}:real"][mask], y[mask], groups, binary)["score"]
+            clock = ridge_cv(data[f"cfg{k}:layer:{name}:clock"][mask], y[mask], groups, binary)["score"]
+            rows.append({"config": config_name(config), "gain": config[0], "input_gain": config[1],
+                         "layer": name, "real": round(real, 4), "clock": round(clock, 4),
+                         "signal": round(real - clock, 4),
+                         "mean_abs_activity": round(float(data["regime"][name]["mean_abs"][k]), 4),
+                         "saturated_fraction": round(float(data["regime"][name]["saturated"][k]), 4)})
+    deepest = {}
+    for config in {r["config"] for r in rows}:
+        mine = [r for r in rows if r["config"] == config]
+        past = [r["layer"] for r in mine if r["signal"] > 0.05]
+        deepest[config] = past[-1] if past else None
+    return {"target": target, "metric": "auc" if binary else "r2", "layers": names, "rows": rows,
+            "deepest_layer_with_signal": deepest,
+            "signal_threshold": 0.05,
+            "samples": int(mask.sum())}
+
+
+def plot_sweep_probe(result: Dict, path) -> None:
+    """Signal (real minus clock) along the pathway, one line per config; plus saturation."""
+    import matplotlib.pyplot as plt
+
+    layers = result["layers"]
+    configs = list(dict.fromkeys(r["config"] for r in result["rows"]))
+    gains = sorted({r["gain"] for r in result["rows"]})
+    cmap = plt.get_cmap("viridis")
+    fig, axes = plt.subplots(1, 2, figsize=(15, 4.8))
+    x = np.arange(len(layers))
+    for config in configs:
+        mine = {r["layer"]: r for r in result["rows"] if r["config"] == config}
+        g, ig = mine[layers[0]]["gain"], mine[layers[0]]["input_gain"]
+        color = cmap(gains.index(g) / max(len(gains) - 1, 1))
+        style = "-" if ig == min(r["input_gain"] for r in result["rows"]) else "--"
+        axes[0].plot(x, [mine[n]["signal"] for n in layers], style, marker="o", color=color, label=config)
+        axes[1].plot(x, [mine[n]["saturated_fraction"] for n in layers], style, marker="o", color=color)
+    axes[0].axhline(result["signal_threshold"], color="gray", lw=0.8, ls=":")
+    axes[0].axhline(0, color="black", lw=0.6)
+    axes[0].set_title(f"Screen signal along the pathway ({result['target']}, {result['metric'].upper()} real − clock)")
+    axes[1].set_title("Fraction of saturated units (|state| > 0.9), real screen")
+    for ax in axes:
+        ax.set_xticks(x, [n.replace("_", "\n") for n in layers], fontsize=8)
+        ax.grid(alpha=0.25)
+    axes[0].legend(fontsize=7, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

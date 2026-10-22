@@ -126,7 +126,9 @@ The connectome structure and sensory projection are frozen during the Mario expe
 The Mario experiment trains the motor readout with PPO (`meta_brain/mario_rl.py`).
 
 1. Eight emulators run in lockstep. Each agent step repeats the chosen action for 4 NES frames, so jumps can be held.
-2. Every step, the current frame (32x32 grayscale playfield) and its frame difference drive the sensory neurons through a fixed random projection. The connectome dynamics then advance 2 micro-steps.
+2. Every step, the current frame (32x32 grayscale playfield) and its frame difference drive the sensory neurons through a fixed random projection. The connectome dynamics then advance 2 micro-steps, with recurrent gain 0.5.
+
+   The gain was 1.6 until October 2026. At that value, linear probes (`meta_brain/mario_probe.py`) showed the network saturating: up to 45% of central-brain units had |state| > 0.9. The screen was no longer decodable past the first optic-lobe synapse, and a blind "clock" input trained as well as the real screen. At gain 0.5 the Goomba distance is decodable from the motor neurons with R² 0.91 using the real screen, against 0.78 for the blind clock.
 3. Motor-neuron activity is standardized with statistics from a random-action warm-up. Linear policy and value heads read it.
 4. After 128 steps per emulator, PPO (GAE, clipped ratio, entropy bonus) updates the two heads. Because the reservoir is frozen, the stored features are reused across epochs.
 5. An episode ends when Mario dies, reaches the flag, or makes no progress for 60 agent steps. Random no-op starts make episodes differ.

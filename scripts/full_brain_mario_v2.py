@@ -94,6 +94,8 @@ def main() -> None:
     parser.add_argument("--updates", type=int, default=int(os.getenv("MB_MARIO_UPDATES", "300")))
     parser.add_argument("--envs", type=int, default=8)
     parser.add_argument("--micro-steps", type=int, default=2)
+    parser.add_argument("--gain", type=float, default=0.5, help="Recurrent gain of the reservoir (V2 used 1.6).")
+    parser.add_argument("--input-gain", type=float, default=1.0)
     parser.add_argument("--eval-episodes", type=int, default=10)
     parser.add_argument("--conditions", default="real,zero",
                         help="Comma-separated vision conditions: real, zero (blind), clock (blind with a timer).")
@@ -121,7 +123,8 @@ def main() -> None:
             env_factory=lambda: make_mario_env("1-1", "right_only")[0],
             out_dir=Path(args.out_dir) / condition,
             settings=MarioSettings(n_envs=args.envs, micro_steps=args.micro_steps,
-                                   eval_episodes=args.eval_episodes, seed=args.seed, vision=condition),
+                                   eval_episodes=args.eval_episodes, seed=args.seed, vision=condition,
+                                   gain=args.gain, input_gain=args.input_gain),
             ppo=PPOConfig(updates=args.updates), graph_info=info, n_actions=len(actions),
         )
     comparison = compare_vision_conditions(runs, args.out_dir)

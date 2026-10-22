@@ -199,11 +199,16 @@ class ConnectomeReservoir:
     ``state <- decay * state + (1 - decay) * tanh(gain * A @ state + drive)``,
     repeated ``micro_steps`` times per agent step, with ``drive`` a fixed
     random projection of the visual code onto the sensory neurons.
+
+    ``gain`` defaults to 0.5. The layer probe sweep showed that at the V2
+    value of 1.6 the network saturates (up to 45% of central-brain units at
+    |state| > 0.9) and the screen is no longer decodable beyond the first
+    optic-lobe synapse; at 0.5 it still reaches the descending neurons.
     """
 
     def __init__(self, structure: SparseStructure, weights: torch.Tensor, sensory: Sequence[int],
                  motor: Sequence[int], input_dim: int, micro_steps: int = 2, decay: float = 0.9,
-                 gain: float = 1.6, input_gain: float = 1.0, seed: int = 0):
+                 gain: float = 0.5, input_gain: float = 1.0, seed: int = 0):
         device = structure.device
         self.n = structure.n
         self.device = device
@@ -537,6 +542,8 @@ class MarioSettings:
     video_fps: int = 60
     seed: int = 123
     vision: str = "real"  # "real" | "zero" | "clock", see VisualInput
+    gain: float = 0.5  # recurrent gain of the reservoir (V2 used 1.6, which saturates; see ConnectomeReservoir)
+    input_gain: float = 1.0
 
 
 def _plot_history(history: List[Dict], path: Path) -> None:
@@ -585,7 +592,8 @@ def run_experiment(structure: SparseStructure, weights: torch.Tensor, sensory: S
     torch.manual_seed(settings.seed)
     started = time.time()
     reservoir = ConnectomeReservoir(structure, weights, sensory, motor, code_dim(settings.size),
-                                    micro_steps=settings.micro_steps, seed=settings.seed)
+                                    micro_steps=settings.micro_steps, gain=settings.gain,
+                                    input_gain=settings.input_gain, seed=settings.seed)
 
     def runner(i: int) -> MarioRunner:
         return MarioRunner(env_factory(), settings.frame_skip, settings.noop_max, settings.stuck_steps,
