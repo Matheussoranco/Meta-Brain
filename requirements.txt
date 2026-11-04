@@ -21,9 +21,9 @@ fsspec>=2023.0.0
 gcsfs>=2023.0.0
 
 # Mario environment
-gymnasium>=0.29.0
-gym-super-mario-bros>=7.3.0
-nes-py>=8.2.1
+gymnasium>=1.0.0,<2
+gym-super-mario-bros==9.1.0
+nes-py==9.0.1
 
 # Image processing
 opencv-python>=4.8.0

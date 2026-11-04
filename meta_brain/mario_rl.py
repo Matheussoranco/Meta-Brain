@@ -53,8 +53,16 @@ def make_mario_env(stage: str = "1-1", actions: str = "right_only"):
     return env, ["+".join(a) for a in table]
 
 
-def _reset(env):
-    out = env.reset()
+def _reset(env, seed=None):
+    if seed is None:
+        out = env.reset()
+    else:
+        try:
+            out = env.reset(seed=seed)
+        except TypeError as exc:
+            if "unexpected keyword argument 'seed'" not in str(exc):
+                raise
+            out = env.reset()  # compatibility with legacy Gym and simple test environments
     return out[0] if isinstance(out, tuple) else out
 
 
@@ -62,23 +70,27 @@ def _step(env, action: int):
     out = env.step(int(action))
     if len(out) == 5:
         obs, reward, terminated, truncated, info = out
-        return obs, float(reward), bool(terminated or truncated), dict(info)
+        return obs, float(reward), bool(terminated or truncated), dict(
+            info, terminated=bool(terminated), env_truncated=bool(truncated))
     obs, reward, done, info = out
-    return obs, float(reward), bool(done), dict(info)
+    return obs, float(reward), bool(done), dict(info, terminated=bool(done), env_truncated=False)
 
 
 class MarioRunner:
     """One environment with frame skip, no-op starts, progress cut-off and frame recording."""
 
     def __init__(self, env, frame_skip: int = 4, noop_max: int = 30, stuck_steps: int = 60,
-                 max_steps: int = 1500, seed: int = 0):
+                 max_steps: int = 1500, seed: int = 0, record_stride: int = 1):
         self.env = env
         self.frame_skip = frame_skip
         self.noop_max = noop_max
         self.stuck_steps = stuck_steps
         self.max_steps = max_steps
         self.rng = np.random.default_rng(seed)
+        self.reset_rng = np.random.default_rng(seed + 1_000_000)
         self.record = False
+        self.record_stride = max(1, record_stride)
+        self.capture_count = 0
         self.frames: List[np.ndarray] = []
         self.info: Dict = {}
         self.steps = self.since_progress = 0
@@ -87,12 +99,15 @@ class MarioRunner:
 
     def _capture(self, obs) -> None:
         if self.record:
-            self.frames.append(np.asarray(obs, dtype=np.uint8).copy())
+            if self.capture_count % self.record_stride == 0:
+                self.frames.append(np.asarray(obs, dtype=np.uint8).copy())
+            self.capture_count += 1
 
     def reset(self, record: bool = False):
         self.record = record
         self.frames = []
-        obs = _reset(self.env)
+        self.capture_count = 0
+        obs = _reset(self.env, seed=int(self.reset_rng.integers(0, 2**31)))
         self._capture(obs)
         info: Dict = {}
         for _ in range(int(self.rng.integers(0, self.noop_max + 1))):
@@ -122,8 +137,11 @@ class MarioRunner:
         else:
             self.since_progress += 1
         flag = bool(info.get("flag_get", False))
-        truncated = not done and (self.since_progress >= self.stuck_steps or self.steps >= self.max_steps)
-        info = dict(info, flag_get=flag, died=bool(done and not flag), truncated=truncated)
+        truncated = bool(info.get("env_truncated", False)) or (
+            not done and (self.since_progress >= self.stuck_steps or self.steps >= self.max_steps))
+        terminated = bool(info.get("terminated", done))
+        info = dict(info, flag_get=flag, died=bool(terminated and not flag),
+                    terminated=terminated, truncated=truncated)
         self.info = info
         return obs, total, done or truncated, info
 

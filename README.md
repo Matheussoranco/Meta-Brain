@@ -1,5 +1,36 @@
 # Meta-Brain
 
+## Start here: trainable full-connectome Mario on Colab Pro (V3)
+
+Upload **[`notebooks/colab_full_brain_mario_v3.ipynb`](notebooks/colab_full_brain_mario_v3.ipynb)** to [Google Colab](https://colab.research.google.com/), select a GPU runtime (high RAM if available), and run its cells in order. It is self-contained and does not require a repository clone or a local GPU. Authorize Google Drive to preserve data, graph cache, checkpoints and results between sessions.
+
+V3 addresses the frozen-learning bottleneck in V2: PPO now trains a small CNN visual encoder, recurrent/input gains, biases and decay constants shared by cell type, and nonlinear motor policy/value heads. The signed connectome edges remain fixed. Every action is decoded from motor neurons after full-graph propagation; there is no image-to-policy bypass. This is trainable connectome-constrained dynamics, **not** independent training of every synapse or MAML.
+
+- Full `Traced` graph, with a guard of at least 100,000 neurons and 5 million edges; visual input is restricted to optic sensory cells.
+- Recurrent PPO differentiates through contiguous sequences with bounded BPTT, rather than reusing frozen motor features.
+- A real full-graph forward/backward/Adam preflight measures GPU memory and verifies visual gradients. On a new run, it reduces batch size/BPTT on CUDA OOM without shrinking the graph.
+- `latest.pt` saves weights, optimizer, RNG state, configuration, history and update count every 10 updates; `best.pt` uses fixed validation starts. Restarting the notebook resumes training with fresh emulator episodes. Graph and configuration checks prevent loading incompatible checkpoints.
+- Default target: 10,000 updates; session training budget: 3 hours, then independent final evaluation. Data preparation/evaluation take additional time. Re-running extends toward the target; increase it to continue beyond that target.
+- Before/after validation uses matched seeds; final deterministic and sampled evaluations use separate seeds. Finite no-op offsets can overlap: this tests the same stage, not held-out-level generalization. Both success rates and all episode outcomes are reported. A best-episode video is not a success-rate estimate.
+- `real`, `zero`, and `clock` are independent training conditions in separate folders. Use matching seeds, batch sizes and completed update counts for comparisons. No claim about connectome advantage is made from one run.
+- Emulator pins: `gym-super-mario-bros==9.1.0`, `nes-py==9.0.1`, Gymnasium 1.x. Keep Colab's CUDA PyTorch and NumPy; do not install the complete local requirements over Colab's preinstalled stack.
+
+**Validation boundary:** V3 is covered by software tests, notebook execution on a small synthetic graph, and a short real-NES train/resume/video smoke test. Full MaleCNS CUDA training and reliable World 1-1 completion must still be measured on Colab. No winning checkpoint is bundled.
+
+See the [Portuguese Colab guide](docs/COLAB_MARIO_V3.md). To regenerate the notebook after editing the package:
+
+```bash
+python scripts/build_colab_mario_v3_notebook.py
+```
+
+The same experiment has a remote/local CUDA CLI:
+
+```bash
+python scripts/full_brain_mario_v3.py --download --updates 10000 --hours 3
+```
+
+## V2 background and historical results
+
 ## Full-connectome-inspired reinforcement learning with the *Drosophila melanogaster* connectome
 
 Meta-Brain is an experimental framework for using the male *Drosophila melanogaster* central nervous system connectome as a sparse recurrent computational substrate for embodied learning.
