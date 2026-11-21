@@ -298,7 +298,7 @@ class PPOConfig:
     gamma: float = 0.99
     lam: float = 0.95
     clip: float = 0.2
-    epochs: int = 4
+    epochs: int = 8
     minibatches: int = 4
     lr: float = 3e-4
     entropy: float = 0.005
