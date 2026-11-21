@@ -301,7 +301,7 @@ class PPOConfig:
     epochs: int = 4
     minibatches: int = 4
     lr: float = 3e-4
-    entropy: float = 0.01
+    entropy: float = 0.005
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
     reward_scale: float = 0.1
