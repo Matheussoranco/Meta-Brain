@@ -287,7 +287,9 @@ class ReadoutPolicy(nn.Module):
                 "mean_feature_std": float(std.mean()), "mean_abs_activity": float(features.abs().mean())}
 
     def forward(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        z = (features - self.mean) / self.std
+        # Bound standardized features so steady-state reservoir drift after a short
+        # warm-up cannot explode linear logits/gradients by tens of sigma.
+        z = ((features - self.mean) / self.std).clamp(-10.0, 10.0)
         return self.pi(z), self.v(z).squeeze(-1)
 
 
@@ -304,6 +306,7 @@ class PPOConfig:
     entropy: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
+    target_kl: float = 0.03
     reward_scale: float = 0.1
     warmup_steps: int = 64
 
@@ -401,22 +404,32 @@ def train_ppo(rollout: BatchedRollout, policy: ReadoutPolicy, cfg: PPOConfig,
         F_ = torch.cat(feats)
         A_ = torch.cat(acts)
         LP_ = torch.cat(logps)
+        V_ = torch.cat(vals)
         ADV = torch.as_tensor(adv.reshape(-1), device=device)
         RET = torch.as_tensor(returns.reshape(-1), device=device)
         ADV = (ADV - ADV.mean()) / (ADV.std() + 1e-8)
         n = len(A_)
         mb = max(1, n // cfg.minibatches)
-        stats = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "clip_frac": 0.0}
+        stats = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "clip_frac": 0.0, "kl": 0.0}
         count = 0
+        stop_early = False
         for _ in range(cfg.epochs):
+            if stop_early:
+                break
             perm = torch.randperm(n, device=device)
             for s in range(0, n, mb):
                 idx = perm[s:s + mb]
                 logits, value = policy(F_[idx])
                 dist = torch.distributions.Categorical(logits=logits)
-                ratio = torch.exp(dist.log_prob(A_[idx]) - LP_[idx])
+                log_ratio = dist.log_prob(A_[idx]) - LP_[idx]
+                ratio = torch.exp(log_ratio)
+                approx_kl = float(((ratio - 1.0) - log_ratio).mean().detach())
+                if cfg.target_kl > 0 and approx_kl > cfg.target_kl:
+                    stop_early = True
+                    break
                 pg = -torch.min(ratio * ADV[idx], ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ADV[idx]).mean()
-                vloss = (value - RET[idx]).pow(2).mean()
+                vclip = V_[idx] + (value - V_[idx]).clamp(-cfg.clip, cfg.clip)
+                vloss = 0.5 * torch.maximum((value - RET[idx]).pow(2), (vclip - RET[idx]).pow(2)).mean()
                 ent = dist.entropy().mean()
                 loss = pg + cfg.value_coef * vloss - cfg.entropy * ent
                 opt.zero_grad()
@@ -427,6 +440,7 @@ def train_ppo(rollout: BatchedRollout, policy: ReadoutPolicy, cfg: PPOConfig,
                 stats["value_loss"] += float(vloss.detach())
                 stats["entropy"] += float(ent.detach())
                 stats["clip_frac"] += float(((ratio - 1).abs() > cfg.clip).float().mean())
+                stats["kl"] += approx_kl
                 count += 1
         finished = rollout.episodes[first_episode:]
         row = {"update": update, "agent_steps": (update + 1) * cfg.rollout * n_envs,
