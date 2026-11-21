@@ -135,6 +135,35 @@ def test_ppo_learns_to_move_right():
     assert p_right() > max(0.6, before + 0.2)
 
 
+def test_readout_policy_clamps_standardized_outliers():
+    policy = ReadoutPolicy(4, 3, seed=0)
+    with torch.no_grad():
+        policy.pi.weight.fill_(1.0)
+        policy.pi.bias.zero_()
+    at_bound = policy(torch.full((1, 4), 10.0))[0]
+    extreme = policy(torch.full((1, 4), 100.0))[0]
+    assert torch.allclose(at_bound, extreme)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 5, 6])
+def test_ppo_learns_to_move_right_across_seeds(seed):
+    torch.manual_seed(seed)
+    res = small_reservoir(seed=seed)
+    runners = [MarioRunner(FakeMario(wall=10_000, die_at=200), frame_skip=2, noop_max=3, seed=i)
+               for i in range(4)]
+    rollout = BatchedRollout(runners, res, size=(8, 8))
+    policy = ReadoutPolicy(res.n_motor, 3, seed=seed)
+    warmup_normalization(rollout, policy, steps=8, n_actions=3)
+
+    def p_right():
+        with torch.no_grad():
+            return float(torch.softmax(policy(rollout.features)[0], -1)[:, 1].mean())
+
+    before = p_right()
+    train_ppo(rollout, policy, PPOConfig(updates=25, rollout=32, lr=3e-3, warmup_steps=0), log=None)
+    assert p_right() > max(0.6, before + 0.2)
+
+
 def test_evaluate_returns_best_episode_frames():
     res = small_reservoir()
     policy = ReadoutPolicy(res.n_motor, 3)
