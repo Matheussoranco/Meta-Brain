@@ -19,7 +19,7 @@ jobs:
           # The pinned Gymnasium-based emulator releases require Python 3.13+.
           python-version: '3.13'
       - name: Install core and real Mario smoke-test dependencies
-        run: python -m pip install numpy scipy pandas pyarrow pyyaml torch networkx matplotlib pytest requests ipython gymnasium 'gym-super-mario-bros==9.1.0' 'nes-py==9.0.1'
+        run: python -m pip install numpy scipy pandas pyarrow pyyaml torch networkx matplotlib pytest requests ipython opencv-python gymnasium 'gym-super-mario-bros==9.1.0' 'nes-py==9.0.1'
       - name: Install video encoder
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
       - run: python -m pip check
