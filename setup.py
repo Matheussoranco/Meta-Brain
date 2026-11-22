@@ -38,6 +38,8 @@ setup(
         "notebooks": [
             "jupyter>=1.0.0",
             "ipykernel>=6.25.0",
+            "ipython>=8.0.0",
+            "requests>=2.31.0",
             "matplotlib>=3.7.0",
             "seaborn>=0.12.0",
         ],
